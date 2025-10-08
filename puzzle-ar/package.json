@@ -1,0 +1,32 @@
+{
+  "name": "puzzle-ar",
+  "version": "1.0.0",
+  "description": "An Augmented Reality chemistry learning experience featuring a jigsaw puzzle and video integration.",
+  "main": "src/index.jsx",
+  "scripts": {
+    "start": "vite",
+    "build": "vite build",
+    "serve": "vite preview"
+  },
+  "dependencies": {
+    "react": "^17.0.2",
+    "react-dom": "^17.0.2",
+    "three": "^0.132.2",
+    "aframe": "^1.2.0",
+    "react-three-fiber": "^7.0.5"
+  },
+  "devDependencies": {
+    "vite": "^2.6.4",
+    "eslint": "^7.32.0",
+    "eslint-plugin-react": "^7.27.1"
+  },
+  "keywords": [
+    "augmented-reality",
+    "chemistry",
+    "education",
+    "puzzle",
+    "video"
+  ],
+  "author": "Your Name",
+  "license": "MIT"
+}
