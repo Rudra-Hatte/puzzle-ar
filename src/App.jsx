@@ -4,28 +4,34 @@ import PuzzleGame from './components/PuzzleGame';
 import ARViewer from './components/ARViewer';
 
 const EXPERIMENTS = {
-  distillation: {
-    name: 'Distillation',
-    image: '/images/distillation.jpg',
-    video: '/videos/distillation.mp4',
-    description: 'Learn about separating mixtures through distillation'
+  convexLens: {
+    name: 'Light Through Convex Lens',
+    image: '/images/convex-lens.jpg',
+    video: '/videos/convex-lens.mp4',
+    description: 'Explore how light rays converge through a convex lens',
+    type: 'physics',
+    concepts: ['Refraction', 'Focal Point', 'Ray Diagrams', 'Image Formation']
   },
-  titration: {
-    name: 'Titration',
-    image: '/images/titration.jpg',
-    video: '/videos/titration.mp4',
-    description: 'Master acid-base titration techniques'
+  reflection: {
+    name: 'Light Reflection',
+    image: '/images/reflection.jpg',
+    video: '/videos/reflection.mp4',
+    description: 'Understand the laws of reflection with mirrors',
+    type: 'physics',
+    concepts: ['Angle of Incidence', 'Angle of Reflection', 'Mirror Images']
   },
-  crystallization: {
-    name: 'Crystallization',
-    image: '/images/crystallization.jpg',
-    video: '/videos/crystallization.mp4',
-    description: 'Understand crystal formation processes'
+  prism: {
+    name: 'Light Dispersion Through Prism',
+    image: '/images/prism.jpg',
+    video: '/videos/prism.mp4',
+    description: 'See how white light splits into rainbow colors',
+    type: 'physics',
+    concepts: ['Dispersion', 'Spectrum', 'Wavelength', 'Color Theory']
   }
 };
 
 function App() {
-  const [currentStep, setCurrentStep] = useState('select'); // select, puzzle, ar
+  const [currentStep, setCurrentStep] = useState('select');
   const [selectedExperiment, setSelectedExperiment] = useState(null);
   const [puzzleCompleted, setPuzzleCompleted] = useState(false);
 
@@ -50,7 +56,8 @@ function App() {
   return (
     <div className="app">
       <header className="app-header">
-        <h1>🧩 AR Chemistry Puzzle</h1>
+        <h1>🔬 Physics AR Puzzle</h1>
+        <p className="app-subtitle">Learn Optics Through Interactive Puzzles</p>
         {currentStep !== 'select' && (
           <button className="reset-btn" onClick={handleReset}>
             🏠 Back to Menu
