@@ -1,28 +1,24 @@
 {
-  "name": "ar-chemistry-puzzle",
+  "name": "ar-physics-puzzle",
   "private": true,
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite --host",
+    "dev": "vite --host --port 3000",
     "build": "vite build",
-    "preview": "vite preview --host",
-    "deploy": "npm run build && netlify deploy --prod --dir dist"
+    "preview": "vite preview",
+    "start": "npm run dev",
+    "deploy": "npm run build"
   },
   "dependencies": {
-    "react": "^18.2.0",
-    "react-dom": "^18.2.0",
+    "react": "18.2.0",
+    "react-dom": "18.2.0",
     "three": "^0.157.0",
-    "@react-three/fiber": "^8.15.12",
-    "@react-three/drei": "^9.88.13",
-    "mind-ar": "^1.2.2",
-    "aframe": "^1.4.2",
-    "aframe-ar": "^0.3.2"
+    "@react-three/fiber": "^8.15.0",
+    "@react-three/drei": "^9.88.0"
   },
   "devDependencies": {
-    "@types/react": "^18.2.37",
-    "@types/react-dom": "^18.2.15",
-    "@vitejs/plugin-react": "^4.1.1",
-    "vite": "^4.5.0"
+    "@vitejs/plugin-react": "4.0.3",
+    "vite": "4.4.5"
   }
 }
