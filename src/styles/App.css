@@ -5,10 +5,9 @@
 }
 
 body {
-  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  font-family: Arial, sans-serif;
   background: #000;
   color: white;
-  overflow-x: hidden;
 }
 
 .app {
@@ -20,14 +19,12 @@ body {
   display: flex;
   flex-direction: column;
   min-height: 100vh;
+  padding: 1rem;
 }
 
-/* Header */
 .scanner-header {
   text-align: center;
-  padding: 1rem;
-  background: rgba(255, 255, 255, 0.1);
-  backdrop-filter: blur(10px);
+  margin-bottom: 2rem;
 }
 
 .scanner-header h1 {
@@ -41,9 +38,8 @@ body {
 
 /* Experiment Selector */
 .experiment-selector {
-  padding: 1rem;
   text-align: center;
-  background: rgba(255, 255, 255, 0.05);
+  margin-bottom: 2rem;
 }
 
 .experiment-selector label {
@@ -53,22 +49,20 @@ body {
 }
 
 .experiment-selector select {
-  padding: 0.75rem 1rem;
+  padding: 0.5rem;
   font-size: 1rem;
-  border: none;
-  border-radius: 25px;
-  background: white;
-  color: #333;
-  min-width: 250px;
+  border-radius: 5px;
 }
 
 /* Camera Container */
 .camera-container {
   position: relative;
   flex: 1;
-  min-height: 60vh;
+  min-height: 400px;
   background: #000;
+  border-radius: 10px;
   overflow: hidden;
+  margin-bottom: 2rem;
 }
 
 .camera-feed {
@@ -82,17 +76,11 @@ body {
   position: absolute;
   top: 50%;
   left: 50%;
-  transform: translate(-50%, -50%) perspective(1000px) rotateX(-5deg);
+  transform: translate(-50%, -50%);
   width: 70%;
-  max-width: 400px;
-  height: auto;
-  border-radius: 15px;
-  box-shadow: 
-    0 20px 40px rgba(0, 0, 0, 0.3),
-    0 0 20px rgba(255, 255, 255, 0.1);
-  border: 3px solid rgba(255, 255, 255, 0.2);
-  animation: arFloat 3s ease-in-out infinite;
-  z-index: 10;
+  border-radius: 10px;
+  border: 3px solid #00ff88;
+  box-shadow: 0 0 20px rgba(0, 255, 136, 0.5);
 }
 
 /* Detection Frame */
@@ -102,54 +90,13 @@ body {
   left: 50%;
   transform: translate(-50%, -50%);
   width: 80%;
-  max-width: 300px;
   height: 60%;
-  border: 3px dashed #00ff88;
-  border-radius: 20px;
+  border: 2px dashed #00ff88;
+  border-radius: 10px;
   display: flex;
   align-items: center;
   justify-content: center;
-  flex-direction: column;
   text-align: center;
-  background: rgba(0, 255, 136, 0.1);
-  animation: scanPulse 2s infinite;
-}
-
-.detection-frame p {
-  margin-top: 1rem;
-  font-size: 1rem;
-  color: #00ff88;
-  text-shadow: 0 0 10px rgba(0, 255, 136, 0.5);
-}
-
-.frame-corners {
-  position: relative;
-  width: 40px;
-  height: 40px;
-}
-
-.frame-corners::before,
-.frame-corners::after {
-  content: '';
-  position: absolute;
-  width: 20px;
-  height: 20px;
-  border: 4px solid #00ff88;
-  box-shadow: 0 0 10px rgba(0, 255, 136, 0.5);
-}
-
-.frame-corners::before {
-  top: -25px;
-  left: -25px;
-  border-right: none;
-  border-bottom: none;
-}
-
-.frame-corners::after {
-  bottom: -25px;
-  right: -25px;
-  border-left: none;
-  border-top: none;
 }
 
 /* Status Overlay */
@@ -159,17 +106,13 @@ body {
   left: 20px;
   right: 20px;
   text-align: center;
-  z-index: 5;
 }
 
 .detected, .scanning {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.75rem 1.5rem;
-  border-radius: 25px;
-  font-weight: bold;
-  backdrop-filter: blur(10px);
+  background: rgba(0, 0, 0, 0.7);
+  padding: 0.5rem 1rem;
+  border-radius: 20px;
+  display: inline-block;
 }
 
 .detected {
@@ -194,77 +137,38 @@ body {
   display: flex;
   justify-content: center;
   gap: 1rem;
-  padding: 1.5rem;
-  background: rgba(255, 255, 255, 0.05);
+  margin-bottom: 2rem;
 }
 
 .detect-btn, .stop-btn {
   padding: 1rem 2rem;
   border: none;
   border-radius: 25px;
-  font-size: 1.1rem;
-  font-weight: bold;
+  font-size: 1rem;
   cursor: pointer;
   transition: all 0.3s;
-  backdrop-filter: blur(10px);
 }
 
 .detect-btn {
-  background: linear-gradient(45deg, #00ff88, #00cc6a);
+  background: #00ff88;
   color: white;
-  box-shadow: 0 5px 20px rgba(0, 255, 136, 0.3);
-}
-
-.detect-btn:hover:not(:disabled) {
-  transform: translateY(-2px);
-  box-shadow: 0 8px 25px rgba(0, 255, 136, 0.4);
-}
-
-.detect-btn:disabled {
-  background: #666;
-  cursor: not-allowed;
-  box-shadow: none;
 }
 
 .stop-btn {
-  background: linear-gradient(45deg, #ff4757, #ff3838);
+  background: #ff4757;
   color: white;
-  box-shadow: 0 5px 20px rgba(255, 71, 87, 0.3);
 }
 
-.stop-btn:hover:not(:disabled) {
-  transform: translateY(-2px);
-  box-shadow: 0 8px 25px rgba(255, 71, 87, 0.4);
-}
-
-.stop-btn:disabled {
+.detect-btn:disabled, .stop-btn:disabled {
   background: #666;
   cursor: not-allowed;
-  box-shadow: none;
 }
 
 /* Instructions */
 .instructions {
-  padding: 1.5rem;
-  background: rgba(255, 255, 255, 0.05);
-  backdrop-filter: blur(10px);
-}
-
-.instructions h3 {
-  text-align: center;
-  margin-bottom: 1rem;
-  color: #00ff88;
-}
-
-.instructions ol {
-  max-width: 500px;
-  margin: 0 auto;
-  line-height: 1.6;
-}
-
-.instructions li {
-  margin-bottom: 0.5rem;
-  color: rgba(255, 255, 255, 0.9);
+  background: rgba(255, 255, 255, 0.1);
+  padding: 1rem;
+  border-radius: 10px;
 }
 
 /* Error Screen */
