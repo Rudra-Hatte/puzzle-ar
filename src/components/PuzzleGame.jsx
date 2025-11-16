@@ -6,10 +6,19 @@ function PuzzleGame({ experiment, onComplete }) {
   const [draggedPiece, setDraggedPiece] = useState(null);
   const [isCompleted, setIsCompleted] = useState(false);
   const [moves, setMoves] = useState(0);
+  const [timer, setTimer] = useState(0);
+  const [showHint, setShowHint] = useState(false);
 
   useEffect(() => {
     const puzzlePieces = generatePuzzlePieces(experiment.image, 3, 3);
     setPieces(shuffleArray(puzzlePieces));
+    
+    // Start timer
+    const interval = setInterval(() => {
+      setTimer(prev => prev + 1);
+    }, 1000);
+    
+    return () => clearInterval(interval);
   }, [experiment]);
 
   const handleDragStart = (e, index) => {
@@ -34,7 +43,6 @@ function PuzzleGame({ experiment, onComplete }) {
     setPieces(newPieces);
     setMoves(moves + 1);
     
-    // Check if puzzle is solved
     const solved = checkPuzzleSolved(newPieces);
     if (solved) {
       setIsCompleted(true);
@@ -60,15 +68,35 @@ function PuzzleGame({ experiment, onComplete }) {
     }
   };
 
+  const formatTime = (seconds) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  const toggleHint = () => {
+    setShowHint(!showHint);
+  };
+
   return (
     <div className="puzzle-game">
       <div className="puzzle-header">
         <h2>Complete the {experiment.name} Puzzle</h2>
+        <div className="experiment-concepts">
+          <p>🔍 You'll learn about: {experiment.concepts.join(' • ')}</p>
+        </div>
         <div className="puzzle-stats">
-          <span>Moves: {moves}</span>
+          <div className="stat-item">
+            <span className="stat-label">⏱️ Time:</span>
+            <span className="stat-value">{formatTime(timer)}</span>
+          </div>
+          <div className="stat-item">
+            <span className="stat-label">🔄 Moves:</span>
+            <span className="stat-value">{moves}</span>
+          </div>
           {isCompleted && (
             <span className="completion-message">
-              🎉 Puzzle Complete! Loading AR...
+              🎉 Puzzle Complete! Loading AR Physics...
             </span>
           )}
         </div>
@@ -94,12 +122,28 @@ function PuzzleGame({ experiment, onComplete }) {
             />
           ))}
         </div>
+        
+        <div className="puzzle-controls">
+          <button 
+            className="hint-btn" 
+            onClick={toggleHint}
+            disabled={isCompleted}
+          >
+            💡 {showHint ? 'Hide' : 'Show'} Reference
+          </button>
+        </div>
       </div>
 
-      <div className="puzzle-reference">
-        <h4>Reference Image:</h4>
-        <img src={experiment.image} alt="Reference" className="reference-image" />
-      </div>
+      {showHint && (
+        <div className="puzzle-reference">
+          <h4>Reference Image:</h4>
+          <img src={experiment.image} alt="Reference" className="reference-image" />
+          <div className="experiment-explanation">
+            <h5>What you'll see in AR:</h5>
+            <p>{experiment.description}</p>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
