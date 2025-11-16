@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import ExperimentSelector from './components/ExperimentSelector';
 import PuzzleGame from './components/PuzzleGame';
 import ARViewer from './components/ARViewer';
+import ARScanner from './components/ARScanner';
+import './styles/App.css';
 
 const EXPERIMENTS = {
   convexLens: {
@@ -87,6 +89,10 @@ function App() {
           />
         )}
       </main>
+
+      <footer className="app-footer">
+        <ARScanner />
+      </footer>
     </div>
   );
 }

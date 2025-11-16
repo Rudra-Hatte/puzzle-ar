@@ -6,608 +6,363 @@
 
 body {
   font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  min-height: 100vh;
+  background: #000;
+  color: white;
+  overflow-x: hidden;
 }
 
 .app {
   min-height: 100vh;
+  background: linear-gradient(135deg, #1e3c72, #2a5298);
+}
+
+.ar-scanner {
   display: flex;
   flex-direction: column;
+  min-height: 100vh;
 }
 
-.app-header {
-  background: rgba(255, 255, 255, 0.95);
-  padding: 1rem 2rem;
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
+/* Header */
+.scanner-header {
+  text-align: center;
+  padding: 1rem;
+  background: rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(10px);
 }
 
-.app-header h1 {
-  color: #2c3e50;
-  font-size: 2rem;
+.scanner-header h1 {
+  font-size: 1.8rem;
+  margin-bottom: 0.5rem;
 }
 
-.reset-btn {
-  background: #e74c3c;
-  color: white;
-  border: none;
-  padding: 0.5rem 1rem;
-  border-radius: 20px;
-  cursor: pointer;
-  font-size: 0.9rem;
-  transition: background 0.3s;
-}
-
-.reset-btn:hover {
-  background: #c0392b;
-}
-
-.app-main {
-  flex: 1;
-  padding: 2rem;
-  display: flex;
-  justify-content: center;
-  align-items: center;
+.scanner-header p {
+  color: rgba(255, 255, 255, 0.8);
 }
 
 /* Experiment Selector */
 .experiment-selector {
-  max-width: 1200px;
-  width: 100%;
-}
-
-.experiment-selector h2 {
-  color: white;
-  text-align: center;
-  margin-bottom: 2rem;
-  font-size: 2.5rem;
-}
-
-.experiments-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-  gap: 2rem;
   padding: 1rem;
-}
-
-.experiment-card {
-  background: rgba(255, 255, 255, 0.95);
-  border-radius: 15px;
-  overflow: hidden;
-  cursor: pointer;
-  transition: transform 0.3s, box-shadow 0.3s;
-  box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
-}
-
-.experiment-card:hover {
-  transform: translateY(-5px);
-  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
-}
-
-.experiment-image {
-  height: 200px;
-  overflow: hidden;
-}
-
-.experiment-image img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-
-.experiment-info {
-  padding: 1.5rem;
-}
-
-.experiment-info h3 {
-  color: #2c3e50;
-  margin-bottom: 0.5rem;
-}
-
-.experiment-info p {
-  color: #7f8c8d;
-  margin-bottom: 1rem;
-}
-
-.start-btn {
-  background: #27ae60;
-  color: white;
-  border: none;
-  padding: 0.75rem 1.5rem;
-  border-radius: 25px;
-  cursor: pointer;
-  font-size: 1rem;
-  width: 100%;
-  transition: background 0.3s;
-}
-
-.start-btn:hover {
-  background: #2ecc71;
-}
-
-/* Puzzle Game */
-.puzzle-game {
-  max-width: 800px;
-  width: 100%;
-  background: rgba(255, 255, 255, 0.95);
-  border-radius: 15px;
-  padding: 2rem;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
-}
-
-.puzzle-header {
   text-align: center;
-  margin-bottom: 2rem;
+  background: rgba(255, 255, 255, 0.05);
 }
 
-.puzzle-header h2 {
-  color: #2c3e50;
-  margin-bottom: 1rem;
-}
-
-.puzzle-stats {
-  display: flex;
-  justify-content: center;
-  gap: 2rem;
-  align-items: center;
-}
-
-.completion-message {
-  color: #27ae60;
+.experiment-selector label {
+  display: block;
+  margin-bottom: 0.5rem;
   font-weight: bold;
-  animation: pulse 1s infinite;
 }
 
-@keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.7; }
-}
-
-.puzzle-container {
-  display: flex;
-  justify-content: center;
-  margin-bottom: 2rem;
-}
-
-.puzzle-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 120px);
-  grid-template-rows: repeat(3, 120px);
-  gap: 2px;
-  background: #34495e;
-  border: 3px solid #34495e;
-  border-radius: 10px;
-}
-
-.puzzle-piece {
-  background-size: 360px 360px;
-  background-repeat: no-repeat;
-  border: 1px solid #ecf0f1;
-  cursor: grab;
-  transition: transform 0.2s, box-shadow 0.2s;
-  user-select: none;
-  touch-action: none;
-}
-
-.puzzle-piece:hover {
-  transform: scale(1.05);
-  box-shadow: 0 5px 15px rgba(0, 0, 0, 0.3);
-  z-index: 10;
-}
-
-.puzzle-piece.dragging {
-  opacity: 0.7;
-  transform: scale(1.1);
-}
-
-.puzzle-reference {
-  text-align: center;
-}
-
-.puzzle-reference h4 {
-  color: #2c3e50;
-  margin-bottom: 0.5rem;
-}
-
-.reference-image {
-  max-width: 200px;
-  border-radius: 10px;
-  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.2);
-}
-
-/* AR Viewer */
-.ar-viewer {
-  width: 100%;
-  max-width: 900px;
-  background: rgba(255, 255, 255, 0.95);
-  border-radius: 15px;
-  padding: 2rem;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
-}
-
-.ar-instructions {
-  text-align: center;
-  margin-bottom: 2rem;
-}
-
-.ar-instructions h2 {
-  color: #2c3e50;
-  margin-bottom: 1rem;
-}
-
-.ar-instructions p {
-  color: #7f8c8d;
-  font-size: 1.1rem;
-  margin-bottom: 1.5rem;
-}
-
-.ar-controls {
-  display: flex;
-  justify-content: center;
-  gap: 1rem;
-  margin-bottom: 2rem;
-}
-
-.back-btn {
-  background: #95a5a6;
-  color: white;
-  border: none;
-  padding: 0.75rem 1.5rem;
-  border-radius: 25px;
-  cursor: pointer;
+.experiment-selector select {
+  padding: 0.75rem 1rem;
   font-size: 1rem;
-  transition: background 0.3s;
-}
-
-.back-btn:hover {
-  background: #7f8c8d;
-}
-
-.ar-scene-container {
-  width: 100%;
-  height: 400px;
-  border-radius: 10px;
-  overflow: hidden;
-  margin-bottom: 2rem;
-  background: #000;
-}
-
-.ar-scene-container a-scene {
-  width: 100%;
-  height: 100%;
-}
-
-.ar-tips {
-  background: #f8f9fa;
-  padding: 1.5rem;
-  border-radius: 10px;
-  border-left: 4px solid #3498db;
-}
-
-.ar-tips h4 {
-  color: #2c3e50;
-  margin-bottom: 1rem;
-}
-
-.ar-tips ul {
-  list-style: none;
-  padding: 0;
-}
-
-.ar-tips li {
-  color: #7f8c8d;
-  margin-bottom: 0.5rem;
-  padding-left: 1.5rem;
-  position: relative;
-}
-
-.ar-tips li:before {
-  content: "✓";
-  color: #27ae60;
-  position: absolute;
-  left: 0;
-}
-
-.ar-error {
-  text-align: center;
-  padding: 2rem;
-  background: rgba(231, 76, 60, 0.1);
-  border-radius: 10px;
-  border: 2px solid #e74c3c;
-}
-
-.ar-error h2 {
-  color: #e74c3c;
-  margin-bottom: 1rem;
-}
-
-.ar-error p {
-  color: #c0392b;
-  margin-bottom: 1.5rem;
-}
-
-.ar-error button {
-  background: #e74c3c;
-  color: white;
   border: none;
-  padding: 0.75rem 1.5rem;
   border-radius: 25px;
-  cursor: pointer;
-  font-size: 1rem;
+  background: white;
+  color: #333;
+  min-width: 250px;
 }
 
-/* True AR Styles */
-.ar-container {
+/* Camera Container */
+.camera-container {
   position: relative;
-  width: 100%;
-  height: 70vh;
-  max-height: 500px;
-  border-radius: 15px;
-  overflow: hidden;
+  flex: 1;
+  min-height: 60vh;
   background: #000;
-  margin-bottom: 1rem;
+  overflow: hidden;
 }
 
 .camera-feed {
   width: 100%;
   height: 100%;
   object-fit: cover;
-  position: absolute;
-  top: 0;
-  left: 0;
 }
 
-.ar-overlay {
+/* AR Video Overlay */
+.ar-video-overlay {
   position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  pointer-events: none;
-  z-index: 2;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%) perspective(1000px) rotateX(-5deg);
+  width: 70%;
+  max-width: 400px;
+  height: auto;
+  border-radius: 15px;
+  box-shadow: 
+    0 20px 40px rgba(0, 0, 0, 0.3),
+    0 0 20px rgba(255, 255, 255, 0.1);
+  border: 3px solid rgba(255, 255, 255, 0.2);
+  animation: arFloat 3s ease-in-out infinite;
+  z-index: 10;
 }
 
-.scanning-frame {
+/* Detection Frame */
+.detection-frame {
   position: absolute;
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
-  width: 250px;
-  height: 200px;
-  border: 2px dashed #27ae60;
-  border-radius: 10px;
+  width: 80%;
+  max-width: 300px;
+  height: 60%;
+  border: 3px dashed #00ff88;
+  border-radius: 20px;
   display: flex;
   align-items: center;
   justify-content: center;
+  flex-direction: column;
   text-align: center;
-  color: white;
-  background: rgba(0, 0, 0, 0.3);
-  z-index: 3;
-  animation: scanning-pulse 2s infinite;
+  background: rgba(0, 255, 136, 0.1);
+  animation: scanPulse 2s infinite;
 }
 
-.scan-corners::before,
-.scan-corners::after {
+.detection-frame p {
+  margin-top: 1rem;
+  font-size: 1rem;
+  color: #00ff88;
+  text-shadow: 0 0 10px rgba(0, 255, 136, 0.5);
+}
+
+.frame-corners {
+  position: relative;
+  width: 40px;
+  height: 40px;
+}
+
+.frame-corners::before,
+.frame-corners::after {
   content: '';
   position: absolute;
   width: 20px;
   height: 20px;
-  border: 3px solid #27ae60;
+  border: 4px solid #00ff88;
+  box-shadow: 0 0 10px rgba(0, 255, 136, 0.5);
 }
 
-.scan-corners::before {
-  top: -5px;
-  left: -5px;
+.frame-corners::before {
+  top: -25px;
+  left: -25px;
   border-right: none;
   border-bottom: none;
 }
 
-.scan-corners::after {
-  bottom: -5px;
-  right: -5px;
+.frame-corners::after {
+  bottom: -25px;
+  right: -25px;
   border-left: none;
   border-top: none;
 }
 
-.debug-info {
+/* Status Overlay */
+.status-overlay {
   position: absolute;
-  bottom: 10px;
-  left: 10px;
-  right: 10px;
-  background: rgba(0, 0, 0, 0.8);
-  color: #27ae60;
-  padding: 0.5rem;
-  border-radius: 5px;
-  font-size: 0.9rem;
+  top: 20px;
+  left: 20px;
+  right: 20px;
   text-align: center;
-  z-index: 4;
+  z-index: 5;
 }
 
-.ar-controls {
+.detected, .scanning {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem 1.5rem;
+  border-radius: 25px;
+  font-weight: bold;
+  backdrop-filter: blur(10px);
+}
+
+.detected {
+  background: rgba(0, 255, 136, 0.2);
+  color: #00ff88;
+  border: 2px solid #00ff88;
+  animation: successPulse 1s infinite;
+}
+
+.scanning {
+  background: rgba(255, 255, 255, 0.1);
+  color: white;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+}
+
+.status-icon {
+  font-size: 1.2rem;
+}
+
+/* Controls */
+.scanner-controls {
   display: flex;
   justify-content: center;
   gap: 1rem;
-  margin-bottom: 2rem;
-  flex-wrap: wrap;
+  padding: 1.5rem;
+  background: rgba(255, 255, 255, 0.05);
 }
 
-.scan-btn {
-  background: #27ae60;
-  color: white;
-  border: none;
+.detect-btn, .stop-btn {
   padding: 1rem 2rem;
+  border: none;
   border-radius: 25px;
-  cursor: pointer;
   font-size: 1.1rem;
   font-weight: bold;
+  cursor: pointer;
   transition: all 0.3s;
-  box-shadow: 0 4px 15px rgba(39, 174, 96, 0.3);
+  backdrop-filter: blur(10px);
 }
 
-.scan-btn:hover:not(:disabled) {
-  background: #2ecc71;
+.detect-btn {
+  background: linear-gradient(45deg, #00ff88, #00cc6a);
+  color: white;
+  box-shadow: 0 5px 20px rgba(0, 255, 136, 0.3);
+}
+
+.detect-btn:hover:not(:disabled) {
   transform: translateY(-2px);
-  box-shadow: 0 6px 20px rgba(39, 174, 96, 0.4);
+  box-shadow: 0 8px 25px rgba(0, 255, 136, 0.4);
 }
 
-.scan-btn:disabled {
-  background: #95a5a6;
+.detect-btn:disabled {
+  background: #666;
   cursor: not-allowed;
-  transform: none;
   box-shadow: none;
 }
 
 .stop-btn {
-  background: #e74c3c;
+  background: linear-gradient(45deg, #ff4757, #ff3838);
   color: white;
-  border: none;
-  padding: 1rem 2rem;
-  border-radius: 25px;
-  cursor: pointer;
-  font-size: 1.1rem;
-  transition: all 0.3s;
+  box-shadow: 0 5px 20px rgba(255, 71, 87, 0.3);
 }
 
 .stop-btn:hover:not(:disabled) {
-  background: #c0392b;
   transform: translateY(-2px);
+  box-shadow: 0 8px 25px rgba(255, 71, 87, 0.4);
 }
 
 .stop-btn:disabled {
-  background: #bdc3c7;
+  background: #666;
   cursor: not-allowed;
+  box-shadow: none;
 }
 
-.ar-instructions {
-  background: linear-gradient(135deg, #667eea, #764ba2);
-  color: white;
+/* Instructions */
+.instructions {
   padding: 1.5rem;
-  border-radius: 15px;
-  margin-top: 1rem;
+  background: rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(10px);
 }
 
-.ar-instructions h4 {
+.instructions h3 {
+  text-align: center;
   margin-bottom: 1rem;
-  color: #ffffff;
+  color: #00ff88;
 }
 
-.ar-instructions ol {
-  margin: 0;
-  padding-left: 1.5rem;
+.instructions ol {
+  max-width: 500px;
+  margin: 0 auto;
+  line-height: 1.6;
 }
 
-.ar-instructions li {
+.instructions li {
   margin-bottom: 0.5rem;
-  line-height: 1.5;
+  color: rgba(255, 255, 255, 0.9);
 }
 
-@keyframes scanning-pulse {
+/* Error Screen */
+.error-screen {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  min-height: 100vh;
+  text-align: center;
+  padding: 2rem;
+}
+
+.error-screen h2 {
+  font-size: 2rem;
+  margin-bottom: 1rem;
+  color: #ff4757;
+}
+
+.error-screen p {
+  font-size: 1.1rem;
+  margin-bottom: 2rem;
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.error-screen button {
+  padding: 1rem 2rem;
+  background: #00ff88;
+  color: white;
+  border: none;
+  border-radius: 25px;
+  font-size: 1.1rem;
+  cursor: pointer;
+}
+
+/* Animations */
+@keyframes arFloat {
   0%, 100% {
-    border-color: #27ae60;
-    box-shadow: 0 0 0 0 rgba(39, 174, 96, 0.4);
+    transform: translate(-50%, -50%) perspective(1000px) rotateX(-5deg) rotateY(2deg);
   }
   50% {
-    border-color: #2ecc71;
-    box-shadow: 0 0 0 10px rgba(39, 174, 96, 0);
+    transform: translate(-50%, -50%) perspective(1000px) rotateX(-3deg) rotateY(-2deg);
   }
 }
 
-/* Mobile Responsiveness */
-@media (max-width: 768px) {
-  .app-header {
-    padding: 0.5rem 1rem;
-    flex-direction: column;
-    gap: 1rem;
+@keyframes scanPulse {
+  0%, 100% {
+    border-color: #00ff88;
+    box-shadow: 0 0 0 0 rgba(0, 255, 136, 0.4);
   }
-  
-  .app-header h1 {
+  50% {
+    border-color: #00cc6a;
+    box-shadow: 0 0 0 15px rgba(0, 255, 136, 0);
+  }
+}
+
+@keyframes successPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+
+/* Mobile Responsive */
+@media (max-width: 768px) {
+  .scanner-header h1 {
     font-size: 1.5rem;
   }
   
-  .app-main {
-    padding: 1rem;
+  .experiment-selector select {
+    min-width: 200px;
   }
   
-  .experiments-grid {
-    grid-template-columns: 1fr;
-    gap: 1rem;
+  .ar-video-overlay {
+    width: 85%;
   }
   
-  .puzzle-grid {
-    grid-template-columns: repeat(3, 100px);
-    grid-template-rows: repeat(3, 100px);
+  .detection-frame {
+    width: 90%;
+    height: 50%;
   }
   
-  .ar-scene-container {
-    height: 300px;
-  }
-  
-  .puzzle-game {
-    padding: 1rem;
-  }
-  
-  .ar-viewer {
-    padding: 1rem;
-  }
-  
-  .concept-tags {
-    justify-content: center;
-  }
-  
-  .physics-overlay {
-    position: static;
-    margin: 1rem;
-    max-width: none;
-  }
-  
-  .experiment-concepts {
-    padding: 0.5rem;
-  }
-  
-  .learning-objectives {
-    padding: 0.5rem;
-  }
-  
-  .ar-container {
-    height: 60vh;
-  }
-  
-  .scanning-frame {
-    width: 200px;
-    height: 150px;
-  }
-  
-  .ar-controls {
+  .scanner-controls {
+    flex-direction: column;
     gap: 0.5rem;
   }
   
-  .scan-btn, .stop-btn {
-    padding: 0.75rem 1.5rem;
-    font-size: 1rem;
+  .detect-btn, .stop-btn {
+    width: 100%;
+    max-width: 300px;
   }
   
-  .ar-instructions {
+  .instructions {
     padding: 1rem;
   }
 }
 
-/* Landscape mobile optimization */
+/* Landscape mobile */
 @media (max-width: 768px) and (orientation: landscape) {
-  .ar-container {
-    height: 50vh;
-  }
-}
-
-@media (max-width: 480px) {
-  .puzzle-grid {
-    grid-template-columns: repeat(3, 80px);
-    grid-template-rows: repeat(3, 80px);
-  }
-  
-  .puzzle-piece {
-    background-size: 240px 240px;
+  .camera-container {
+    min-height: 50vh;
   }
 }

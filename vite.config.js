@@ -3,14 +3,19 @@ import react from '@vitejs/plugin-react'
 
 export default defineConfig({
   plugins: [react()],
-  server: {
-    host: true,
-    port: 3000,
-    https: false, // Will be handled by Render
-  },
+  root: '.',
+  publicDir: 'public',
   build: {
     outDir: 'dist',
     sourcemap: false,
+    rollupOptions: {
+      input: {
+        main: './index.html'
+      }
+    }
   },
-  base: './'
+  server: {
+    host: true,
+    port: 3000,
+  }
 })
