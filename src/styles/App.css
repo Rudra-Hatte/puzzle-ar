@@ -177,14 +177,35 @@ body {
   object-fit: cover;
   z-index: 2;
   transition: opacity 0.5s ease;
+  border-radius: 12px;
 }
 
 .ar-video.playing {
-  opacity: 1;
+  opacity: 0.9;
 }
 
 .ar-video.hidden {
   opacity: 0;
+  pointer-events: none;
+}
+
+.video-loading-overlay {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  text-align: center;
+  z-index: 3;
+  background: rgba(0, 0, 0, 0.7);
+  padding: 1rem;
+  border-radius: 10px;
+  color: white;
+}
+
+.loading-spinner.small {
+  width: 30px;
+  height: 30px;
+  border-width: 3px;
 }
 
 .ar-content-overlay {
@@ -199,6 +220,15 @@ body {
   flex-direction: column;
   justify-content: space-between;
   padding: 1rem;
+}
+
+.ar-content-overlay.video-active {
+  background: rgba(0, 0, 0, 0.1);
+}
+
+.ar-content-overlay.video-active .physics-demo {
+  opacity: 0;
+  pointer-events: none;
 }
 
 .ar-header {
@@ -540,6 +570,68 @@ body {
   border: none;
   border-radius: 10px;
   cursor: pointer;
+}
+
+/* Additional Styles */
+.video-controls {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.sound-toggle, .video-replay {
+  background: rgba(255, 255, 255, 0.1);
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  color: white;
+  padding: 0.5rem;
+  border-radius: 50%;
+  cursor: pointer;
+  font-size: 1rem;
+  transition: all 0.3s;
+  min-width: 40px;
+  min-height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.sound-toggle:hover, .video-replay:hover {
+  background: rgba(255, 255, 255, 0.2);
+  transform: scale(1.1);
+}
+
+.video-status {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+  justify-content: center;
+}
+
+.status-good {
+  background: rgba(0, 255, 136, 0.2);
+  color: #00ff88;
+  padding: 0.25rem 0.5rem;
+  border-radius: 10px;
+  border: 1px solid #00ff88;
+  font-size: 0.8rem;
+}
+
+.status-warning {
+  background: rgba(255, 165, 0, 0.2);
+  color: #ffa500;
+  padding: 0.25rem 0.5rem;
+  border-radius: 10px;
+  border: 1px solid #ffa500;
+  font-size: 0.8rem;
+}
+
+.status-loading {
+  background: rgba(100, 150, 255, 0.2);
+  color: #6496ff;
+  padding: 0.25rem 0.5rem;
+  border-radius: 10px;
+  border: 1px solid #6496ff;
+  font-size: 0.8rem;
 }
 
 /* Animations */
