@@ -204,6 +204,185 @@ body {
   cursor: pointer;
 }
 
+/* Detected Info */
+.detected-info {
+  background: rgba(0, 255, 136, 0.2);
+  padding: 0.75rem;
+  border-radius: 15px;
+  margin-top: 1rem;
+  border: 2px solid #00ff88;
+  text-align: center;
+}
+
+.detected-info h3 {
+  margin: 0 0 0.5rem 0;
+  color: #00ff88;
+  font-size: 1.1rem;
+}
+
+/* Confidence */
+.confidence {
+  background: rgba(0, 255, 136, 0.3);
+  padding: 0.25rem 0.75rem;
+  border-radius: 12px;
+  font-size: 0.9rem;
+  font-weight: bold;
+}
+
+/* Detection Frame - Detected State */
+.detection-frame.detected {
+  border-color: #00ff88;
+  background: rgba(0, 255, 136, 0.15);
+  box-shadow: 0 0 20px rgba(0, 255, 136, 0.5);
+  animation: detectedPulse 2s infinite;
+}
+
+/* Detection Info */
+.detection-info {
+  text-align: center;
+  color: white;
+}
+
+/* Scan Status */
+.scan-status {
+  font-size: 1rem;
+  margin-bottom: 0.5rem;
+  text-shadow: 0 0 10px rgba(0, 0, 0, 0.8);
+}
+
+/* Confidence Bar */
+.confidence-bar {
+  width: 200px;
+  height: 20px;
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 10px;
+  margin: 0 auto;
+  overflow: hidden;
+  position: relative;
+}
+
+.confidence-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #ff4757, #ffa502, #00ff88);
+  border-radius: 10px;
+  transition: width 0.3s ease;
+}
+
+.confidence-bar span {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 0.8rem;
+  font-weight: bold;
+  text-shadow: 0 0 5px rgba(0, 0, 0, 0.8);
+}
+
+/* Status */
+.status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  border-radius: 20px;
+  backdrop-filter: blur(10px);
+  font-weight: bold;
+}
+
+.status.detected {
+  background: rgba(0, 255, 136, 0.2);
+  color: #00ff88;
+  border: 2px solid #00ff88;
+  animation: successGlow 1.5s infinite;
+}
+
+.status.scanning {
+  background: rgba(100, 150, 255, 0.2);
+  color: #6496ff;
+  border: 2px solid #6496ff;
+  animation: scanningPulse 2s infinite;
+}
+
+/* Reset Button */
+.reset-btn {
+  background: linear-gradient(45deg, #667eea, #764ba2);
+  color: white;
+  border: none;
+  padding: 0.75rem 1.5rem;
+  border-radius: 20px;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: all 0.3s;
+}
+
+.reset-btn:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+}
+
+.reset-btn:disabled {
+  background: #666;
+  cursor: not-allowed;
+}
+
+/* Detection Status */
+.detection-status {
+  flex: 1;
+  text-align: center;
+}
+
+/* Status Text */
+.status-text {
+  color: #00ff88;
+  font-weight: bold;
+  font-size: 0.9rem;
+}
+
+/* Supported Puzzles */
+.supported-puzzles {
+  margin-top: 1.5rem;
+  background: rgba(255, 255, 255, 0.05);
+  padding: 1rem;
+  border-radius: 10px;
+}
+
+.supported-puzzles h4 {
+  color: #6496ff;
+  margin-bottom: 1rem;
+  text-align: center;
+}
+
+/* Puzzle List */
+.puzzle-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 0.5rem;
+}
+
+/* Puzzle Item */
+.puzzle-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.5rem 1rem;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  border-left: 4px solid #00ff88;
+}
+
+/* Puzzle Name */
+.puzzle-name {
+  font-size: 0.9rem;
+  color: white;
+}
+
+/* Min Confidence */
+.min-confidence {
+  font-size: 0.8rem;
+  color: #00ff88;
+  font-weight: bold;
+}
+
 /* Animations */
 @keyframes arFloat {
   0%, 100% {
@@ -228,6 +407,37 @@ body {
 @keyframes successPulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.7; }
+}
+
+@keyframes detectedPulse {
+  0%, 100% {
+    border-color: #00ff88;
+    box-shadow: 0 0 20px rgba(0, 255, 136, 0.5);
+  }
+  50% {
+    border-color: #00cc6a;
+    box-shadow: 0 0 30px rgba(0, 255, 136, 0.8);
+  }
+}
+
+@keyframes successGlow {
+  0%, 100% { 
+    box-shadow: 0 0 10px rgba(0, 255, 136, 0.5);
+  }
+  50% { 
+    box-shadow: 0 0 20px rgba(0, 255, 136, 0.8);
+  }
+}
+
+@keyframes scanningPulse {
+  0%, 100% { 
+    opacity: 0.8;
+    box-shadow: 0 0 5px rgba(100, 150, 255, 0.3);
+  }
+  50% { 
+    opacity: 1;
+    box-shadow: 0 0 15px rgba(100, 150, 255, 0.6);
+  }
 }
 
 /* Mobile Responsive */
@@ -261,6 +471,24 @@ body {
   
   .instructions {
     padding: 1rem;
+  }
+  
+  .confidence-bar {
+    width: 150px;
+    height: 16px;
+  }
+  
+  .puzzle-list {
+    grid-template-columns: 1fr;
+  }
+  
+  .scanner-controls {
+    flex-direction: column;
+    gap: 1rem;
+  }
+  
+  .detection-status {
+    order: -1;
   }
 }
 
