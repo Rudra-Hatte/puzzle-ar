@@ -80,8 +80,8 @@ function ARScanner() {
     const detectionScore = analyzeForConvexLens(ctx, canvas);
     setConfidence(detectionScore);
 
-    // Trigger AR if confidence > 60%
-    if (detectionScore > 60) {
+    // Trigger AR if confidence > 38% (lowered threshold)
+    if (detectionScore > 38) {
       console.log(`🎯 Convex lens detected! Confidence: ${detectionScore}%`);
       triggerAR();
     }
@@ -310,13 +310,13 @@ function ARScanner() {
               <div style={{
                 width: `${confidence}%`,
                 height: '100%',
-                backgroundColor: confidence > 60 ? '#00ff88' : '#ffa500',
+                backgroundColor: confidence > 38 ? '#00ff88' : '#ffa500',
                 borderRadius: '4px',
                 transition: 'all 0.3s ease'
               }} />
             </div>
             <p style={{ margin: '0.5rem 0', fontSize: '0.9rem' }}>
-              Detection: {confidence}% {confidence > 60 && '🎯'}
+              Detection: {confidence}% {confidence > 38 && '🎯 TRIGGER!'}
             </p>
           </div>
         )}
@@ -427,7 +427,7 @@ function ARScanner() {
           }}>
             <div style={{ textAlign: 'center' }}>
               <p style={{ fontSize: '1rem', margin: '0' }}>🔍 Point at convex lens</p>
-              <small style={{ color: 'rgba(255, 255, 255, 0.8)' }}>AI will detect automatically</small>
+              <small style={{ color: 'rgba(255, 255, 255, 0.8)' }}>Need 38%+ confidence to trigger</small>
             </div>
           </div>
         )}
