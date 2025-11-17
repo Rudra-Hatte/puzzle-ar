@@ -57,10 +57,10 @@ body {
 /* Camera Container */
 .camera-container {
   position: relative;
-  flex: 1;
-  min-height: 400px;
+  width: 100%;
+  height: 400px;
   background: #000;
-  border-radius: 10px;
+  border-radius: 15px;
   overflow: hidden;
   margin-bottom: 2rem;
 }
@@ -69,7 +69,9 @@ body {
   width: 100%;
   height: 100%;
   object-fit: cover;
-  transition: opacity 0.3s ease;
+  background: #000;
+  opacity: 0.3;
+  transition: opacity 0.5s ease;
 }
 
 .camera-feed.ready {
@@ -77,31 +79,176 @@ body {
 }
 
 /* AR Video Overlay */
+.ar-overlay-container {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 10;
+}
+
 .ar-video-overlay {
   position: absolute;
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
-  width: 70%;
-  border-radius: 10px;
-  border: 3px solid #00ff88;
-  box-shadow: 0 0 20px rgba(0, 255, 136, 0.5);
+  width: 80%;
+  max-width: 300px;
+  height: auto;
+  border-radius: 15px;
+  border: 4px solid #00ff88;
+  box-shadow: 
+    0 0 20px rgba(0, 255, 136, 0.5),
+    inset 0 0 20px rgba(0, 255, 136, 0.2);
+  background: #000;
+  animation: arGlow 2s infinite;
 }
 
-/* Detection Frame */
-.detection-frame {
+/* Color Overlay */
+.ar-color-overlay {
   position: absolute;
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
   width: 80%;
-  height: 60%;
-  border: 2px dashed #00ff88;
-  border-radius: 10px;
+  max-width: 300px;
+  height: 200px;
+  border-radius: 15px;
+  border: 4px solid #fff;
+  box-shadow: 
+    0 0 30px rgba(255, 255, 255, 0.8),
+    inset 0 0 30px rgba(255, 255, 255, 0.3);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  text-align: center;
+  color: white;
+  animation: colorPulse 3s infinite;
+}
+
+.ar-content {
+  padding: 1rem;
+  text-shadow: 0 0 10px rgba(0, 0, 0, 0.8);
+}
+
+.ar-content h3 {
+  font-size: 1.2rem;
+  margin-bottom: 1rem;
+  text-shadow: 0 0 15px rgba(255, 255, 255, 0.8);
+}
+
+/* Physics Animation */
+.physics-animation {
+  position: relative;
+  width: 80px;
+  height: 80px;
+  margin: 1rem auto;
+}
+
+.pulse-circle {
+  position: absolute;
+  width: 60px;
+  height: 60px;
+  border: 3px solid rgba(255, 255, 255, 0.8);
+  border-radius: 50%;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  animation: pulse 2s infinite;
+}
+
+.rotating-ring {
+  position: absolute;
+  width: 80px;
+  height: 80px;
+  border: 2px dashed rgba(255, 255, 255, 0.6);
+  border-radius: 50%;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  animation: rotate 4s linear infinite;
+}
+
+/* Info Badge */
+.ar-info-badge {
+  position: absolute;
+  top: 20px;
+  left: 20px;
+  background: rgba(0, 255, 136, 0.9);
+  color: white;
+  padding: 0.5rem 1rem;
+  border-radius: 20px;
+  font-size: 0.9rem;
+  font-weight: bold;
+  text-shadow: none;
+  box-shadow: 0 4px 15px rgba(0, 255, 136, 0.4);
+  animation: badgeGlow 2s infinite;
+}
+
+.ar-info-badge small {
+  display: block;
+  font-size: 0.7rem;
+  opacity: 0.9;
+  margin-top: 0.2rem;
+}
+
+/* Enhanced detection frame */
+.detection-frame {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 85%;
+  height: 70%;
+  border: 2px dashed rgba(100, 150, 255, 0.6);
+  border-radius: 15px;
   display: flex;
   align-items: center;
   justify-content: center;
   text-align: center;
+  z-index: 5;
+  transition: all 0.5s ease;
+}
+
+.detection-frame.detected {
+  border-color: #00ff88;
+  border-style: solid;
+  background: rgba(0, 255, 136, 0.1);
+  box-shadow: 
+    0 0 30px rgba(0, 255, 136, 0.5),
+    inset 0 0 30px rgba(0, 255, 136, 0.2);
+}
+
+.frame-corners {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+}
+
+.frame-corners::before,
+.frame-corners::after {
+  content: '';
+  position: absolute;
+  width: 20px;
+  height: 20px;
+  border: 3px solid currentColor;
+}
+
+.frame-corners::before {
+  top: -3px;
+  left: -3px;
+  border-right: none;
+  border-bottom: none;
+}
+
+.frame-corners::after {
+  bottom: -3px;
+  right: -3px;
+  border-left: none;
+  border-top: none;
 }
 
 /* Status Overlay */
@@ -502,6 +649,55 @@ body {
   100% { transform: rotate(360deg); }
 }
 
+@keyframes arGlow {
+  0%, 100% { 
+    box-shadow: 
+      0 0 20px rgba(0, 255, 136, 0.5),
+      inset 0 0 20px rgba(0, 255, 136, 0.2);
+  }
+  50% { 
+    box-shadow: 
+      0 0 30px rgba(0, 255, 136, 0.8),
+      inset 0 0 30px rgba(0, 255, 136, 0.4);
+  }
+}
+
+@keyframes colorPulse {
+  0%, 100% { 
+    transform: translate(-50%, -50%) scale(1);
+    opacity: 0.9;
+  }
+  50% { 
+    transform: translate(-50%, -50%) scale(1.05);
+    opacity: 1;
+  }
+}
+
+@keyframes pulse {
+  0%, 100% { 
+    transform: translate(-50%, -50%) scale(1);
+    opacity: 0.8;
+  }
+  50% { 
+    transform: translate(-50%, -50%) scale(1.2);
+    opacity: 1;
+  }
+}
+
+@keyframes rotate {
+  from { transform: translate(-50%, -50%) rotate(0deg); }
+  to { transform: translate(-50%, -50%) rotate(360deg); }
+}
+
+@keyframes badgeGlow {
+  0%, 100% { 
+    box-shadow: 0 4px 15px rgba(0, 255, 136, 0.4);
+  }
+  50% { 
+    box-shadow: 0 4px 25px rgba(0, 255, 136, 0.7);
+  }
+}
+
 /* Mobile Responsive */
 @media (max-width: 768px) {
   .scanner-header h1 {
@@ -552,6 +748,30 @@ body {
   .detection-status {
     order: -1;
   }
+  
+  .camera-container {
+    height: 300px;
+  }
+  
+  .ar-video-overlay,
+  .ar-color-overlay {
+    width: 85%;
+    max-width: 250px;
+  }
+  
+  .ar-content h3 {
+    font-size: 1rem;
+  }
+  
+  .physics-animation {
+    width: 60px;
+    height: 60px;
+  }
+  
+  .ar-info-badge {
+    font-size: 0.8rem;
+    padding: 0.4rem 0.8rem;
+  }
 }
 
 /* Landscape mobile */
@@ -559,4 +779,17 @@ body {
   .camera-container {
     min-height: 50vh;
   }
+}
+
+/* Ensure video visibility */
+video {
+  background-color: #000;
+}
+
+video::-webkit-media-controls {
+  display: none !important;
+}
+
+video::-webkit-media-controls-enclosure {
+  display: none !important;
 }
