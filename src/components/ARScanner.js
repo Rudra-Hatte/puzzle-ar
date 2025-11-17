@@ -2,7 +2,6 @@ import React, { useEffect, useRef, useState } from 'react';
 
 function ARScanner() {
   const videoRef = useRef(null);
-  const canvasRef = useRef(null);
   const overlayVideoRef = useRef(null);
   const streamRef = useRef(null);
   
@@ -11,35 +10,39 @@ function ARScanner() {
   const [detectedPuzzle, setDetectedPuzzle] = useState(null);
   const [error, setError] = useState('');
   const [scanning, setScanning] = useState(false);
-  const [arVideoError, setArVideoError] = useState(false);
+  const [arActive, setArActive] = useState(false);
+  const [videoPlaying, setVideoPlaying] = useState(false);
 
-  // Use placeholder videos or solid colors for testing
+  // Enhanced experiments with guaranteed visual content
   const experiments = {
     'convex-lens': {
-      name: 'Convex Lens',
+      name: 'Convex Lens Experiment',
       video: '/videos/convex-lens.mp4',
-      fallback: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
-      color: '#4285f4' // Blue
+      color: '#4285f4',
+      icon: '🔍',
+      description: 'Light focusing through convex lens',
+      animation: 'lens'
     },
     'reflection': {
       name: 'Light Reflection', 
       video: '/videos/reflection.mp4',
-      fallback: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4',
-      color: '#34a853' // Green
+      color: '#34a853',
+      icon: '🪞',
+      description: 'Light bouncing off mirror surface',
+      animation: 'reflection'
     },
     'prism': {
-      name: 'Prism Dispersion',
+      name: 'Light Dispersion',
       video: '/videos/prism.mp4',
-      fallback: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4',
-      color: '#ea4335' // Red
+      color: '#ea4335',
+      icon: '🌈',
+      description: 'White light splitting into spectrum',
+      animation: 'prism'
     }
   };
 
-  // Initialize camera on component mount
   useEffect(() => {
     initializeCamera();
-    
-    // Cleanup on unmount
     return () => {
       cleanupCamera();
     };
@@ -48,195 +51,132 @@ function ARScanner() {
   const initializeCamera = async () => {
     try {
       setCameraState('loading');
-      console.log('🎥 Requesting camera access...');
+      console.log('🎥 Starting camera...');
 
-      // Check if browser supports getUserMedia
-      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        throw new Error('Camera not supported by this browser');
-      }
-
-      // Request camera with fallback options
       const constraints = {
         video: {
-          facingMode: { ideal: 'environment' }, // Prefer back camera
+          facingMode: { ideal: 'environment' },
           width: { ideal: 1280, min: 320 },
           height: { ideal: 720, min: 240 }
         },
         audio: false
       };
 
-      console.log('📱 Getting media stream...');
       const stream = await navigator.mediaDevices.getUserMedia(constraints);
-      
       streamRef.current = stream;
       
       if (videoRef.current) {
-        console.log('🎬 Setting video source...');
         videoRef.current.srcObject = stream;
         
-        // Wait for video to load
         videoRef.current.onloadedmetadata = () => {
-          console.log('✅ Video metadata loaded');
           videoRef.current.play()
             .then(() => {
-              console.log('▶️ Video playing successfully');
+              console.log('✅ Camera ready');
               setCameraState('ready');
               setError('');
               
-              // Start detection after camera is ready
               setTimeout(() => {
                 setScanning(true);
-                startDetection();
               }, 1000);
             })
             .catch(err => {
-              console.error('❌ Video play failed:', err);
-              setError('Failed to start camera playback');
+              console.error('❌ Camera play failed:', err);
               setCameraState('error');
+              setError('Failed to start camera');
             });
-        };
-
-        videoRef.current.onerror = (e) => {
-          console.error('❌ Video error:', e);
-          setError('Video stream error');
-          setCameraState('error');
         };
       }
 
     } catch (err) {
-      console.error('❌ Camera initialization failed:', err);
-      let errorMessage = 'Camera access failed. ';
-      
-      if (err.name === 'NotAllowedError') {
-        errorMessage += 'Please allow camera permissions and refresh the page.';
-      } else if (err.name === 'NotFoundError') {
-        errorMessage += 'No camera found on this device.';
-      } else if (err.name === 'NotSupportedError') {
-        errorMessage += 'Camera not supported by this browser.';
-      } else {
-        errorMessage += err.message || 'Unknown camera error.';
-      }
-      
-      setError(errorMessage);
+      console.error('❌ Camera failed:', err);
       setCameraState('error');
+      setError('Camera access denied. Please allow permissions and refresh.');
     }
   };
 
   const cleanupCamera = () => {
-    console.log('🧹 Cleaning up camera...');
-    
     if (streamRef.current) {
-      streamRef.current.getTracks().forEach(track => {
-        track.stop();
-        console.log('⏹️ Camera track stopped');
-      });
+      streamRef.current.getTracks().forEach(track => track.stop());
       streamRef.current = null;
     }
-    
     if (videoRef.current) {
       videoRef.current.srcObject = null;
     }
-    
     setScanning(false);
-    setCameraState('initializing');
-  };
-
-  const startDetection = () => {
-    console.log('🔍 Starting puzzle detection...');
-    // Simple detection - just check if camera is working
-    setTimeout(() => {
-      if (cameraState === 'ready' && scanning) {
-        console.log('🎯 Simulating puzzle detection...');
-        // For testing, auto-detect after 3 seconds
-        simulateDetection();
-      }
-    }, 3000);
-  };
-
-  const simulateDetection = () => {
-    const puzzleTypes = Object.keys(experiments);
-    const randomPuzzle = puzzleTypes[Math.floor(Math.random() * puzzleTypes.length)];
-    
-    console.log(`🎲 Simulated detection: ${randomPuzzle}`);
-    handleDetection(randomPuzzle);
+    setArActive(false);
+    setVideoPlaying(false);
   };
 
   const handleDetection = (puzzleType) => {
-    console.log(`✨ Puzzle detected: ${puzzleType}`);
+    console.log(`🎯 Activating AR for: ${puzzleType}`);
     
     setDetectedPuzzle(puzzleType);
     setPuzzleDetected(true);
     setScanning(false);
-    setArVideoError(false);
-    
-    // Try to play AR video with fallbacks
+    setArActive(true);
+    setVideoPlaying(false);
+
+    // Try to load and play video with sound
     if (overlayVideoRef.current) {
       const experiment = experiments[puzzleType];
-      
-      // First try the main video
       overlayVideoRef.current.src = experiment.video;
       
+      // Remove muted to allow sound
+      overlayVideoRef.current.muted = false;
+      overlayVideoRef.current.volume = 0.7;
+      
       overlayVideoRef.current.onloadeddata = () => {
-        console.log('🎬 AR video loaded successfully');
-        overlayVideoRef.current.play().catch(err => {
-          console.warn('⚠️ Main AR video play failed, trying fallback:', err);
-          tryFallbackVideo(puzzleType);
-        });
+        console.log('📹 Video loaded, attempting play...');
+        
+        // Try to play with sound first
+        overlayVideoRef.current.play()
+          .then(() => {
+            console.log('🔊 Video playing with sound!');
+            setVideoPlaying(true);
+          })
+          .catch(() => {
+            console.log('🔇 Retrying muted...');
+            overlayVideoRef.current.muted = true;
+            return overlayVideoRef.current.play();
+          })
+          .then(() => {
+            if (overlayVideoRef.current.muted) {
+              console.log('🔇 Video playing muted');
+              setVideoPlaying(true);
+            }
+          })
+          .catch(err => {
+            console.warn('❌ Video play failed completely:', err);
+            setVideoPlaying(false);
+          });
       };
-      
-      overlayVideoRef.current.onerror = () => {
-        console.warn('⚠️ Main AR video failed to load, trying fallback');
-        tryFallbackVideo(puzzleType);
+
+      overlayVideoRef.current.onerror = (e) => {
+        console.warn('❌ Video load error:', e);
+        setVideoPlaying(false);
       };
-      
-      // Set timeout to try fallback if main video doesn't load
+
+      // Fallback timeout
       setTimeout(() => {
-        if (overlayVideoRef.current && overlayVideoRef.current.readyState === 0) {
-          console.log('🕐 Video loading timeout, trying fallback');
-          tryFallbackVideo(puzzleType);
+        if (!videoPlaying) {
+          console.log('⏰ Video timeout - using visual overlay only');
         }
       }, 3000);
     }
-    
-    // Reset after 15 seconds
+
+    // Auto reset after 15 seconds
     setTimeout(() => {
       resetDetection();
     }, 15000);
   };
 
-  const tryFallbackVideo = (puzzleType) => {
-    const experiment = experiments[puzzleType];
-    
-    if (overlayVideoRef.current) {
-      console.log(`🔄 Trying fallback video for ${puzzleType}`);
-      overlayVideoRef.current.src = experiment.fallback;
-      
-      overlayVideoRef.current.onloadeddata = () => {
-        console.log('✅ Fallback video loaded');
-        overlayVideoRef.current.play().catch(err => {
-          console.warn('⚠️ Fallback video failed, showing color overlay:', err);
-          showColorOverlay(puzzleType);
-        });
-      };
-      
-      overlayVideoRef.current.onerror = () => {
-        console.warn('⚠️ Fallback video failed, showing color overlay');
-        showColorOverlay(puzzleType);
-      };
-    }
-  };
-
-  const showColorOverlay = (puzzleType) => {
-    console.log(`🎨 Showing color overlay for ${puzzleType}`);
-    setArVideoError(true);
-  };
-
   const resetDetection = () => {
-    console.log('🔄 Resetting detection...');
+    console.log('🔄 Resetting AR...');
     
     setPuzzleDetected(false);
     setDetectedPuzzle(null);
-    setArVideoError(false);
+    setArActive(false);
+    setVideoPlaying(false);
     
     if (overlayVideoRef.current) {
       overlayVideoRef.current.pause();
@@ -244,11 +184,9 @@ function ARScanner() {
       overlayVideoRef.current.src = '';
     }
     
-    // Restart scanning if camera is ready
     if (cameraState === 'ready') {
       setTimeout(() => {
         setScanning(true);
-        startDetection();
       }, 2000);
     }
   };
@@ -257,7 +195,13 @@ function ARScanner() {
     handleDetection(puzzleType);
   };
 
-  // Render different states
+  const toggleVideoSound = () => {
+    if (overlayVideoRef.current) {
+      overlayVideoRef.current.muted = !overlayVideoRef.current.muted;
+      console.log(`🔊 Sound: ${overlayVideoRef.current.muted ? 'OFF' : 'ON'}`);
+    }
+  };
+
   if (cameraState === 'error') {
     return (
       <div className="error-screen">
@@ -271,15 +215,6 @@ function ARScanner() {
             📹 Retry Camera
           </button>
         </div>
-        <div className="help-text">
-          <h4>Troubleshooting:</h4>
-          <ul>
-            <li>Allow camera permissions</li>
-            <li>Use Chrome or Safari browser</li>
-            <li>Ensure good lighting</li>
-            <li>Try refreshing the page</li>
-          </ul>
-        </div>
       </div>
     );
   }
@@ -288,12 +223,29 @@ function ARScanner() {
     <div className="ar-scanner">
       <div className="scanner-header">
         <h1>🔬 Physics AR Scanner</h1>
-        <p>
-          {cameraState === 'loading' && '📹 Initializing camera...'}
-          {cameraState === 'ready' && scanning && '🔍 Scanning for puzzles...'}
-          {cameraState === 'ready' && !scanning && '⏸️ Detection paused'}
-          {puzzleDetected && `✨ Detected: ${experiments[detectedPuzzle]?.name}`}
-        </p>
+        <div className="status-bar">
+          <span className={`camera-status ${cameraState}`}>
+            {cameraState === 'loading' && '📹 Loading...'}
+            {cameraState === 'ready' && scanning && '🔍 Scanning...'}
+            {arActive && '🎯 AR Active'}
+          </span>
+          
+          {videoPlaying && (
+            <button 
+              className="sound-toggle"
+              onClick={toggleVideoSound}
+            >
+              {overlayVideoRef.current?.muted ? '🔇' : '🔊'}
+            </button>
+          )}
+        </div>
+        
+        {detectedPuzzle && (
+          <div className="detected-info">
+            <span className="puzzle-icon">{experiments[detectedPuzzle].icon}</span>
+            <span className="puzzle-name">{experiments[detectedPuzzle].name}</span>
+          </div>
+        )}
       </div>
 
       <div className="camera-container">
@@ -304,22 +256,9 @@ function ARScanner() {
           autoPlay
           playsInline
           muted
-          style={{
-            width: '100%',
-            height: '400px',
-            objectFit: 'cover',
-            backgroundColor: '#000',
-            borderRadius: '10px'
-          }}
         />
 
-        {/* Hidden canvas for image processing */}
-        <canvas
-          ref={canvasRef}
-          style={{ display: 'none' }}
-        />
-
-        {/* Loading Overlay */}
+        {/* Loading State */}
         {cameraState === 'loading' && (
           <div className="camera-loading">
             <div className="loading-spinner"></div>
@@ -327,61 +266,89 @@ function ARScanner() {
           </div>
         )}
 
-        {/* AR Overlays */}
-        {puzzleDetected && detectedPuzzle && (
-          <div className="ar-overlay-container">
-            {/* Video Overlay */}
-            {!arVideoError && (
-              <video
-                ref={overlayVideoRef}
-                className="ar-video-overlay"
-                loop
-                muted
-                playsInline
-                controls={false}
-              />
-            )}
-            
-            {/* Color Fallback Overlay */}
-            {arVideoError && (
-              <div 
-                className="ar-color-overlay"
-                style={{ backgroundColor: experiments[detectedPuzzle].color }}
-              >
-                <div className="ar-content">
-                  <h3>🔬 {experiments[detectedPuzzle].name}</h3>
-                  <div className="physics-animation">
-                    <div className="pulse-circle"></div>
-                    <div className="rotating-ring"></div>
+        {/* AR Overlay - Always Visible When Active */}
+        {arActive && detectedPuzzle && (
+          <div className="ar-overlay-main">
+            {/* Background overlay with experiment color */}
+            <div 
+              className="ar-background"
+              style={{ 
+                background: `linear-gradient(45deg, ${experiments[detectedPuzzle].color}40, ${experiments[detectedPuzzle].color}80)`
+              }}
+            />
+
+            {/* Video overlay (hidden if not playing) */}
+            <video
+              ref={overlayVideoRef}
+              className={`ar-video ${videoPlaying ? 'playing' : 'hidden'}`}
+              loop
+              playsInline
+            />
+
+            {/* Always visible content overlay */}
+            <div className="ar-content-overlay">
+              <div className="ar-header">
+                <span className="ar-icon">{experiments[detectedPuzzle].icon}</span>
+                <h3>{experiments[detectedPuzzle].name}</h3>
+              </div>
+
+              <div className={`physics-demo ${experiments[detectedPuzzle].animation}`}>
+                {experiments[detectedPuzzle].animation === 'lens' && (
+                  <div className="lens-animation">
+                    <div className="light-ray ray-1"></div>
+                    <div className="light-ray ray-2"></div>
+                    <div className="light-ray ray-3"></div>
+                    <div className="lens-shape"></div>
+                    <div className="focal-point"></div>
                   </div>
-                  <p>Physics demonstration active!</p>
-                  <small>(Video unavailable - showing interactive AR)</small>
+                )}
+
+                {experiments[detectedPuzzle].animation === 'reflection' && (
+                  <div className="reflection-animation">
+                    <div className="incident-ray"></div>
+                    <div className="reflected-ray"></div>
+                    <div className="mirror-surface"></div>
+                    <div className="normal-line"></div>
+                  </div>
+                )}
+
+                {experiments[detectedPuzzle].animation === 'prism' && (
+                  <div className="prism-animation">
+                    <div className="white-light"></div>
+                    <div className="prism-shape"></div>
+                    <div className="spectrum">
+                      <div className="color-ray red"></div>
+                      <div className="color-ray orange"></div>
+                      <div className="color-ray yellow"></div>
+                      <div className="color-ray green"></div>
+                      <div className="color-ray blue"></div>
+                      <div className="color-ray violet"></div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="ar-description">
+                <p>{experiments[detectedPuzzle].description}</p>
+                <div className="status-indicators">
+                  <span className={`indicator ${arActive ? 'active' : ''}`}>🎯 AR</span>
+                  <span className={`indicator ${videoPlaying ? 'active' : ''}`}>📹 Video</span>
+                  <span className={`indicator ${overlayVideoRef.current?.muted === false ? 'active' : ''}`}>🔊 Audio</span>
                 </div>
               </div>
-            )}
-            
-            {/* AR Info Badge */}
-            <div className="ar-info-badge">
-              <span>🎯 AR Active</span>
-              <small>{experiments[detectedPuzzle].name}</small>
             </div>
           </div>
         )}
 
         {/* Detection Frame */}
-        <div className={`detection-frame ${puzzleDetected ? 'detected' : ''}`}>
+        <div className={`detection-frame ${arActive ? 'ar-active' : ''}`}>
           <div className="frame-corners"></div>
-          {scanning && <p>🎯 Point at your puzzle</p>}
-          {puzzleDetected && <p>🎬 AR Experience Active</p>}
-        </div>
-
-        {/* Status Indicator */}
-        <div className="status-indicator">
-          <div className={`status ${cameraState} ${puzzleDetected ? 'detected' : ''}`}>
-            {cameraState === 'loading' && '⏳ Loading'}
-            {cameraState === 'ready' && !puzzleDetected && '📡 Scanning'}
-            {puzzleDetected && '🎯 AR Active'}
-          </div>
+          {scanning && (
+            <div className="scan-instruction">
+              <p>🎯 Point camera at physics puzzle</p>
+              <small>Or use test buttons below</small>
+            </div>
+          )}
         </div>
       </div>
 
@@ -390,33 +357,32 @@ function ARScanner() {
         {cameraState === 'ready' && (
           <>
             <button 
-              className="control-btn primary"
+              className="control-btn lens"
               onClick={() => handleManualDetect('convex-lens')}
-              disabled={puzzleDetected}
+              disabled={arActive}
             >
-              🔍 Test Lens
+              🔍 Convex Lens
             </button>
             
             <button 
-              className="control-btn primary"
+              className="control-btn reflection"
               onClick={() => handleManualDetect('reflection')}
-              disabled={puzzleDetected}
+              disabled={arActive}
             >
-              🪞 Test Mirror
+              🪞 Reflection
             </button>
             
             <button 
-              className="control-btn primary"
+              className="control-btn prism"
               onClick={() => handleManualDetect('prism')}
-              disabled={puzzleDetected}
+              disabled={arActive}
             >
-              🌈 Test Prism
+              🌈 Prism
             </button>
             
             <button 
-              className="control-btn secondary"
+              className="control-btn reset"
               onClick={resetDetection}
-              disabled={cameraState !== 'ready'}
             >
               🔄 Reset
             </button>
@@ -428,9 +394,9 @@ function ARScanner() {
       <div className="debug-info">
         <small>
           Camera: {cameraState} | 
-          Scanning: {scanning ? 'Yes' : 'No'} | 
-          Detected: {puzzleDetected ? detectedPuzzle : 'None'} |
-          Video Error: {arVideoError ? 'Yes' : 'No'}
+          AR: {arActive ? 'ON' : 'OFF'} | 
+          Video: {videoPlaying ? 'PLAYING' : 'NOT PLAYING'} |
+          Sound: {overlayVideoRef.current?.muted === false ? 'ON' : 'OFF'}
         </small>
       </div>
     </div>
