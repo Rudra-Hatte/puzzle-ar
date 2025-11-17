@@ -12,6 +12,7 @@ function ARScanner() {
   const [puzzleDetected, setPuzzleDetected] = useState(false);
   const [confidence, setConfidence] = useState(0);
   const [videoPlaying, setVideoPlaying] = useState(false);
+  const [videoError, setVideoError] = useState(false);
 
   useEffect(() => {
     startCamera();
@@ -41,7 +42,6 @@ function ARScanner() {
             .then(() => {
               console.log('✅ Camera ready');
               setCameraReady(true);
-              // Start scanning immediately
               setTimeout(() => {
                 startDetection();
               }, 1000);
@@ -57,7 +57,6 @@ function ARScanner() {
     console.log('🔍 Starting real-time detection...');
     setIsScanning(true);
     
-    // Detect every 300ms for fast response
     detectionIntervalRef.current = setInterval(() => {
       detectPuzzle();
     }, 300);
@@ -73,14 +72,11 @@ function ARScanner() {
     canvas.width = video.videoWidth || 640;
     canvas.height = video.videoHeight || 480;
 
-    // Capture current frame
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
     
-    // Detect convex lens patterns
     const detectionScore = analyzeForConvexLens(ctx, canvas);
     setConfidence(detectionScore);
 
-    // Trigger AR if confidence > 38% (lowered threshold)
     if (detectionScore > 38) {
       console.log(`🎯 Convex lens detected! Confidence: ${detectionScore}%`);
       triggerAR();
@@ -93,13 +89,8 @@ function ARScanner() {
     
     let score = 0;
     
-    // 1. Look for circular/oval shapes (lens outline)
     score += detectCircularShapes(data, canvas.width, canvas.height) * 40;
-    
-    // 2. Look for light convergence patterns
     score += detectLightPatterns(data, canvas.width, canvas.height) * 35;
-    
-    // 3. Look for specific colors (clear/blue lens)
     score += detectLensColors(data, canvas.width, canvas.height) * 25;
     
     return Math.min(Math.round(score), 100);
@@ -109,13 +100,11 @@ function ARScanner() {
     let circularPoints = 0;
     let totalPoints = 0;
     
-    // Sample points in a grid
     for (let y = 20; y < height - 20; y += 15) {
       for (let x = 20; x < width - 20; x += 15) {
         const idx = (y * width + x) * 4;
         const current = (data[idx] + data[idx + 1] + data[idx + 2]) / 3;
         
-        // Check surrounding pixels for circular patterns
         let edgeCount = 0;
         const radius = 10;
         
@@ -135,7 +124,7 @@ function ARScanner() {
         }
         
         totalPoints++;
-        if (edgeCount >= 4 && edgeCount <= 6) { // Circular edge pattern
+        if (edgeCount >= 4 && edgeCount <= 6) {
           circularPoints++;
         }
       }
@@ -148,7 +137,6 @@ function ARScanner() {
     let brightPoints = 0;
     let totalSamples = 0;
     
-    // Look for light convergence in center area
     const centerX = width / 2;
     const centerY = height / 2;
     const radius = Math.min(width, height) / 6;
@@ -161,7 +149,6 @@ function ARScanner() {
           
           totalSamples++;
           
-          // Look for bright spots (light convergence)
           if (brightness > 150) {
             brightPoints++;
           }
@@ -176,7 +163,6 @@ function ARScanner() {
     let lensColorPoints = 0;
     let totalSamples = 0;
     
-    // Sample every 20th pixel
     for (let i = 0; i < data.length; i += 80) {
       const r = data[i];
       const g = data[i + 1];
@@ -184,9 +170,8 @@ function ARScanner() {
       
       totalSamples++;
       
-      // Look for clear/transparent lens colors (bluish, clear)
-      if ((b > r + 20 && b > g + 10) || // Bluish tint
-          (Math.abs(r - g) < 15 && Math.abs(g - b) < 15 && r > 100)) { // Clear/bright
+      if ((b > r + 20 && b > g + 10) || 
+          (Math.abs(r - g) < 15 && Math.abs(g - b) < 15 && r > 100)) {
         lensColorPoints++;
       }
     }
@@ -197,7 +182,6 @@ function ARScanner() {
   const triggerAR = () => {
     console.log('🚀 Triggering AR instantly!');
     
-    // Stop detection
     if (detectionIntervalRef.current) {
       clearInterval(detectionIntervalRef.current);
       detectionIntervalRef.current = null;
@@ -205,11 +189,10 @@ function ARScanner() {
     
     setIsScanning(false);
     setPuzzleDetected(true);
+    setVideoError(false);
     
-    // Start video immediately
     playARVideo();
     
-    // Auto-reset after 10 seconds
     setTimeout(() => {
       resetAR();
     }, 10000);
@@ -217,26 +200,112 @@ function ARScanner() {
 
   const playARVideo = () => {
     if (overlayVideoRef.current) {
-      console.log('🎬 Starting video playback...');
+      console.log('🎬 Attempting to play video...');
       
-      // Use a working test video
-      overlayVideoRef.current.src = 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4';
-      overlayVideoRef.current.muted = true; // Start muted for autoplay
+      // Clear any previous source
+      overlayVideoRef.current.pause();
+      overlayVideoRef.current.removeAttribute('src');
+      overlayVideoRef.current.load();
+      
+      // Set video properties
+      overlayVideoRef.current.crossOrigin = 'anonymous';
+      overlayVideoRef.current.preload = 'auto';
+      overlayVideoRef.current.muted = true;
       overlayVideoRef.current.loop = true;
+      overlayVideoRef.current.playsInline = true;
+      overlayVideoRef.current.autoplay = true;
       
-      overlayVideoRef.current.oncanplay = () => {
-        console.log('✅ Video ready, playing now!');
+      // Event handlers
+      overlayVideoRef.current.onloadstart = () => {
+        console.log('📥 Video loading started...');
+      };
+      
+      overlayVideoRef.current.onloadeddata = () => {
+        console.log('📊 Video data loaded');
+      };
+      
+      overlayVideoRef.current.oncanplaythrough = () => {
+        console.log('🎬 Video can play through, starting playback...');
+        
         overlayVideoRef.current.play()
           .then(() => {
+            console.log('✅ Video playing successfully!');
             setVideoPlaying(true);
-            console.log('🎉 Video playing successfully!');
+            setVideoError(false);
           })
           .catch(err => {
             console.error('❌ Video play failed:', err);
+            setVideoError(true);
+            setVideoPlaying(false);
           });
       };
       
-      overlayVideoRef.current.load();
+      overlayVideoRef.current.onerror = (e) => {
+        console.error('❌ Video error:', e);
+        console.log('🔄 Trying fallback approach...');
+        setVideoError(true);
+        setVideoPlaying(false);
+      };
+      
+      overlayVideoRef.current.ontimeupdate = () => {
+        if (!videoPlaying) {
+          setVideoPlaying(true);
+          console.log('🎉 Video confirmed playing via timeupdate');
+        }
+      };
+      
+      // Try multiple video sources
+      const videoSources = [
+        'https://sample-videos.com/zip/10/mp4/SampleVideo_1280x720_1mb.mp4',
+        'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
+        'https://www.w3schools.com/html/mov_bbb.mp4',
+        '/videos/convex-lens.mp4'
+      ];
+      
+      let sourceIndex = 0;
+      
+      const tryNextSource = () => {
+        if (sourceIndex < videoSources.length) {
+          const source = videoSources[sourceIndex];
+          console.log(`🔗 Trying video source ${sourceIndex + 1}: ${source}`);
+          overlayVideoRef.current.src = source;
+          overlayVideoRef.current.load();
+          sourceIndex++;
+        } else {
+          console.log('❌ All video sources failed');
+          setVideoError(true);
+          setVideoPlaying(false);
+        }
+      };
+      
+      overlayVideoRef.current.onerror = () => {
+        console.log(`❌ Source ${sourceIndex} failed, trying next...`);
+        setTimeout(tryNextSource, 1000);
+      };
+      
+      // Set timeout for each source
+      const sourceTimeout = setTimeout(() => {
+        if (!videoPlaying) {
+          console.log(`⏰ Source ${sourceIndex} timeout, trying next...`);
+          tryNextSource();
+        }
+      }, 3000);
+      
+      overlayVideoRef.current.onloadeddata = () => {
+        clearTimeout(sourceTimeout);
+        overlayVideoRef.current.play()
+          .then(() => {
+            setVideoPlaying(true);
+            setVideoError(false);
+            console.log('✅ Video playing!');
+          })
+          .catch(() => {
+            tryNextSource();
+          });
+      };
+      
+      // Start with first source
+      tryNextSource();
     }
   };
 
@@ -245,6 +314,7 @@ function ARScanner() {
     
     setPuzzleDetected(false);
     setVideoPlaying(false);
+    setVideoError(false);
     setConfidence(0);
     
     if (overlayVideoRef.current) {
@@ -252,7 +322,6 @@ function ARScanner() {
       overlayVideoRef.current.src = '';
     }
     
-    // Restart detection after 2 seconds
     setTimeout(() => {
       if (cameraReady) {
         startDetection();
@@ -272,7 +341,6 @@ function ARScanner() {
   return (
     <div style={{ padding: '1rem', maxWidth: '800px', margin: '0 auto', color: 'white' }}>
       
-      {/* Header */}
       <div style={{ textAlign: 'center', marginBottom: '2rem' }}>
         <h1 style={{ 
           fontSize: '1.8rem', 
@@ -322,7 +390,6 @@ function ARScanner() {
         )}
       </div>
 
-      {/* Camera Container */}
       <div style={{
         position: 'relative',
         width: '100%',
@@ -334,7 +401,6 @@ function ARScanner() {
         border: puzzleDetected ? '4px solid #00ff88' : isScanning ? '2px solid #6496ff' : '2px solid #666'
       }}>
         
-        {/* Camera Feed */}
         <video
           ref={videoRef}
           style={{
@@ -348,10 +414,8 @@ function ARScanner() {
           muted
         />
 
-        {/* Hidden canvas for detection */}
         <canvas ref={canvasRef} style={{ display: 'none' }} />
 
-        {/* AR Video Overlay */}
         {puzzleDetected && (
           <div style={{
             position: 'absolute',
@@ -367,18 +431,68 @@ function ARScanner() {
             backgroundColor: '#000'
           }}>
             
+            {/* Video element with better styling */}
             <video
               ref={overlayVideoRef}
               style={{
                 width: '100%',
                 height: '100%',
                 objectFit: 'cover',
-                backgroundColor: '#000'
+                backgroundColor: '#000',
+                display: videoPlaying && !videoError ? 'block' : 'none'
               }}
               playsInline
+              muted
+              loop
             />
 
-            {/* AR Badge */}
+            {/* Show loading/error state */}
+            {(!videoPlaying || videoError) && (
+              <div style={{
+                position: 'absolute',
+                top: '50%',
+                left: '50%',
+                transform: 'translate(-50%, -50%)',
+                textAlign: 'center',
+                color: 'white'
+              }}>
+                {videoError ? (
+                  <div>
+                    <div style={{ fontSize: '3rem', marginBottom: '1rem' }}>🎬</div>
+                    <h3>Physics Demo Active!</h3>
+                    <p>Convex Lens Experiment</p>
+                    <div style={{
+                      width: '100px',
+                      height: '100px',
+                      border: '4px solid #ffd700',
+                      borderRadius: '50%',
+                      margin: '1rem auto',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontSize: '2rem',
+                      animation: 'pulse 2s infinite'
+                    }}>
+                      🔍
+                    </div>
+                  </div>
+                ) : (
+                  <div>
+                    <div style={{
+                      width: '50px',
+                      height: '50px',
+                      border: '4px solid rgba(255, 255, 255, 0.3)',
+                      borderTop: '4px solid #ffd700',
+                      borderRadius: '50%',
+                      animation: 'spin 1s linear infinite',
+                      margin: '0 auto 1rem auto'
+                    }} />
+                    <p>Loading AR Video...</p>
+                  </div>
+                )}
+              </div>
+            )}
+
             <div style={{
               position: 'absolute',
               top: '10px',
@@ -393,7 +507,6 @@ function ARScanner() {
               🔍 Convex Lens AR
             </div>
 
-            {/* Video status */}
             <div style={{
               position: 'absolute',
               top: '10px',
@@ -404,12 +517,11 @@ function ARScanner() {
               borderRadius: '15px',
               fontSize: '0.8rem'
             }}>
-              {videoPlaying ? '📹 Playing' : '⏳ Loading'}
+              {videoPlaying ? '📹 Playing' : videoError ? '🎨 Demo' : '⏳ Loading'}
             </div>
           </div>
         )}
 
-        {/* Scanning Frame */}
         {isScanning && !puzzleDetected && (
           <div style={{
             position: 'absolute',
@@ -433,7 +545,6 @@ function ARScanner() {
         )}
       </div>
 
-      {/* Manual Reset Button */}
       <div style={{ textAlign: 'center', marginBottom: '1rem' }}>
         <button
           onClick={resetAR}
@@ -452,7 +563,6 @@ function ARScanner() {
         </button>
       </div>
 
-      {/* Status */}
       <div style={{
         textAlign: 'center',
         fontFamily: 'monospace',
@@ -465,13 +575,17 @@ function ARScanner() {
         Scanning: {isScanning ? 'ON' : 'OFF'} | 
         Detected: {puzzleDetected ? 'YES' : 'NO'} | 
         Confidence: {confidence}% |
-        Video: {videoPlaying ? 'PLAYING' : 'STOPPED'}
+        Video: {videoPlaying ? 'PLAYING' : videoError ? 'DEMO MODE' : 'LOADING'}
       </div>
 
       <style jsx>{`
         @keyframes pulse {
           0%, 100% { opacity: 0.7; transform: translate(-50%, -50%) scale(1); }
-          50% { opacity: 1; transform: translate(-50%, -50%) scale(1.02); }
+          50% { opacity: 1; transform: translate(-50%, -50%) scale(1.05); }
+        }
+        @keyframes spin {
+          0% { transform: rotate(0deg); }
+          100% { transform: rotate(360deg); }
         }
       `}</style>
     </div>
