@@ -69,6 +69,11 @@ body {
   width: 100%;
   height: 100%;
   object-fit: cover;
+  transition: opacity 0.3s ease;
+}
+
+.camera-feed.ready {
+  opacity: 1;
 }
 
 /* AR Video Overlay */
@@ -164,6 +169,37 @@ body {
   cursor: not-allowed;
 }
 
+.control-btn {
+  padding: 0.75rem 1rem;
+  border: none;
+  border-radius: 15px;
+  font-size: 0.9rem;
+  cursor: pointer;
+  margin: 0.25rem;
+  transition: all 0.3s;
+}
+
+.control-btn.primary {
+  background: linear-gradient(45deg, #00ff88, #00cc6a);
+  color: white;
+}
+
+.control-btn.secondary {
+  background: linear-gradient(45deg, #667eea, #764ba2);
+  color: white;
+}
+
+.control-btn:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 5px 15px rgba(0, 0, 0, 0.3);
+}
+
+.control-btn:disabled {
+  background: #666;
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
 /* Instructions */
 .instructions {
   background: rgba(255, 255, 255, 0.1);
@@ -202,6 +238,23 @@ body {
   border-radius: 25px;
   font-size: 1.1rem;
   cursor: pointer;
+}
+
+.error-actions {
+  display: flex;
+  gap: 1rem;
+  justify-content: center;
+  margin: 1.5rem 0;
+}
+
+.error-actions button {
+  padding: 0.75rem 1.5rem;
+  background: #00ff88;
+  color: white;
+  border: none;
+  border-radius: 10px;
+  cursor: pointer;
+  font-size: 0.9rem;
 }
 
 /* Detected Info */
@@ -289,21 +342,25 @@ body {
   font-weight: bold;
 }
 
+.status.loading {
+  background: rgba(255, 165, 0, 0.2);
+  color: #ffa500;
+  border: 2px solid #ffa500;
+}
+
+.status.ready {
+  background: rgba(100, 150, 255, 0.2);
+  color: #6496ff;
+  border: 2px solid #6496ff;
+}
+
 .status.detected {
   background: rgba(0, 255, 136, 0.2);
   color: #00ff88;
   border: 2px solid #00ff88;
-  animation: successGlow 1.5s infinite;
+  animation: pulse 1s infinite;
 }
 
-.status.scanning {
-  background: rgba(100, 150, 255, 0.2);
-  color: #6496ff;
-  border: 2px solid #6496ff;
-  animation: scanningPulse 2s infinite;
-}
-
-/* Reset Button */
 .reset-btn {
   background: linear-gradient(45deg, #667eea, #764ba2);
   color: white;
@@ -438,6 +495,11 @@ body {
     opacity: 1;
     box-shadow: 0 0 15px rgba(100, 150, 255, 0.6);
   }
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
 }
 
 /* Mobile Responsive */
