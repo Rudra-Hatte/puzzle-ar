@@ -24,6 +24,8 @@ const PROTOTYPE_PUZZLE = {
   mindTargetUrl: '/markers/convex-lens.mind',
   hlsUrl: '/videos/hls/convex-lens.m3u8',
   videoUrl: '/videos/convex-lens.mp4',
+  videoRotationDeg: -90,
+  videoFlipX: true,
 };
 
 function createInitialDebugInfo() {
@@ -198,10 +200,13 @@ async function compileMindTargetFromImage(imageUrl) {
 function ARScanner() {
   const sceneRef = useRef(null);
   const targetEntityRef = useRef(null);
-  const targetPlaneRef = useRef(null);
+  const posterPlaneRef = useRef(null);
+  const videoPlaneRef = useRef(null);
+  const cameraPreviewRef = useRef(null);
   const sourceVideoRef = useRef(null);
   const manualVideoRef = useRef(null);
   const hlsControllerRef = useRef(null);
+  const cameraBindTimerRef = useRef(0);
   const dynamicTargetUrlRef = useRef('');
   const manualDemoModeRef = useRef(false);
   const statusRef = useRef('Tap Start Scanner to begin.');
@@ -212,6 +217,7 @@ function ARScanner() {
   const [loading, setLoading] = useState(false);
   const [scannerStarted, setScannerStarted] = useState(false);
   const [sceneReady, setSceneReady] = useState(false);
+  const [cameraPreviewReady, setCameraPreviewReady] = useState(false);
   const [targetSrc, setTargetSrc] = useState('');
   const [targetSource, setTargetSource] = useState('none');
   const [sourceVideoReady, setSourceVideoReady] = useState(false);
@@ -256,24 +262,61 @@ function ARScanner() {
     }
   }, []);
 
+  const clearCameraBindTimer = useCallback(() => {
+    if (cameraBindTimerRef.current) {
+      window.clearInterval(cameraBindTimerRef.current);
+      cameraBindTimerRef.current = 0;
+    }
+  }, []);
+
+  const bindMindarCameraPreview = useCallback(() => {
+    const scene = sceneRef.current;
+    const preview = cameraPreviewRef.current;
+    if (!scene || !preview) {
+      return false;
+    }
+
+    const systemVideo = scene.systems?.['mindar-image-system']?.video;
+    const domVideo = scene.querySelector('video.mindar-video') || document.querySelector('video.mindar-video');
+    const sourceVideo = systemVideo || domVideo;
+
+    if (!sourceVideo) {
+      return false;
+    }
+
+    preview.muted = true;
+    preview.playsInline = true;
+    preview.setAttribute('playsinline', 'true');
+
+    if (sourceVideo.srcObject) {
+      preview.srcObject = sourceVideo.srcObject;
+    } else if (sourceVideo.src) {
+      preview.src = sourceVideo.src;
+    } else {
+      return false;
+    }
+
+    preview.play().catch(() => {});
+    setCameraPreviewReady(true);
+    return true;
+  }, []);
+
   const setMindarPlaneSource = useCallback((mode) => {
-    const plane = targetPlaneRef.current;
-    if (!plane) {
+    const posterPlane = posterPlaneRef.current;
+    const videoPlane = videoPlaneRef.current;
+
+    if (!posterPlane || !videoPlane) {
       return;
     }
 
     if (mode === 'video') {
-      plane.setAttribute(
-        'material',
-        'shader: flat; src: #mindar-video-source; transparent: true; opacity: 1;'
-      );
+      posterPlane.setAttribute('visible', false);
+      videoPlane.setAttribute('visible', true);
       return;
     }
 
-    plane.setAttribute(
-      'material',
-      'shader: flat; src: #mindar-poster-source; transparent: true; opacity: 1;'
-    );
+    posterPlane.setAttribute('visible', true);
+    videoPlane.setAttribute('visible', false);
   }, []);
 
   const activateManualFallback = useCallback(
@@ -459,12 +502,14 @@ function ARScanner() {
 
     let canceled = false;
     const sourceVideoAtMount = sourceVideoRef.current;
+    const cameraPreviewAtMount = cameraPreviewRef.current;
 
     const startMindar = async () => {
       try {
         setLoading(true);
         setCameraError('');
         setSceneReady(false);
+        setCameraPreviewReady(false);
         setTargetSrc('');
         setTargetSource('none');
         setSourceVideoReady(false);
@@ -543,6 +588,7 @@ function ARScanner() {
 
     return () => {
       canceled = true;
+      clearCameraBindTimer();
       clearHlsController();
 
       const sourceVideo = sourceVideoAtMount;
@@ -554,12 +600,20 @@ function ARScanner() {
         sourceVideo.load();
       }
 
+      const preview = cameraPreviewAtMount;
+      if (preview) {
+        preview.pause();
+        preview.srcObject = null;
+        preview.removeAttribute('src');
+      }
+
       revokeDynamicTargetUrl();
     };
   }, [
     scannerStarted,
     initNonce,
     activateManualFallback,
+    clearCameraBindTimer,
     clearHlsController,
     configureSourceVideo,
     resolveTargetSource,
@@ -581,6 +635,18 @@ function ARScanner() {
     const onArReady = () => {
       setSceneReady(true);
       setLoading(false);
+      setCameraPreviewReady(false);
+
+      let attempts = 0;
+      clearCameraBindTimer();
+      cameraBindTimerRef.current = window.setInterval(() => {
+        attempts += 1;
+        const bound = bindMindarCameraPreview();
+        if (bound || attempts >= 20) {
+          clearCameraBindTimer();
+        }
+      }, 150);
+
       updateDebug(
         {
           sceneReady: true,
@@ -598,10 +664,17 @@ function ARScanner() {
     scene.addEventListener('arError', onArError);
 
     return () => {
+      clearCameraBindTimer();
       scene.removeEventListener('arReady', onArReady);
       scene.removeEventListener('arError', onArError);
     };
-  }, [targetSrc, activateManualFallback, updateDebug]);
+  }, [
+    targetSrc,
+    activateManualFallback,
+    bindMindarCameraPreview,
+    clearCameraBindTimer,
+    updateDebug,
+  ]);
 
   useEffect(() => {
     if (!targetSrc || manualDemoMode) {
@@ -661,7 +734,14 @@ function ARScanner() {
 
     setMindarPlaneSource('video');
     setStatus('Puzzle detected. Video is playing.');
-    updateDebug({ playbackMode: 'video', note: 'Video buffered. Swapped from poster to video.' }, true);
+    updateDebug(
+      {
+        detected: true,
+        playbackMode: 'video',
+        note: 'Video buffered. Swapped from poster to video.',
+      },
+      true
+    );
 
     const sourceVideo = sourceVideoRef.current;
     if (sourceVideo) {
@@ -840,6 +920,14 @@ function ARScanner() {
         )}
 
         <div className="stage-wrap">
+          <video
+            ref={cameraPreviewRef}
+            className={`camera-preview ${cameraPreviewReady ? 'ready' : ''}`}
+            playsInline
+            muted
+            autoPlay
+          />
+
           {scannerStarted && targetSrc && (
             <a-scene
               ref={sceneRef}
@@ -856,11 +944,22 @@ function ARScanner() {
               <a-camera position="0 0 0" look-controls="enabled: false" />
               <a-entity ref={targetEntityRef} mindar-image-target="targetIndex: 0">
                 <a-plane
-                  ref={targetPlaneRef}
+                  ref={posterPlaneRef}
                   position="0 0 0"
                   width="1"
                   height="0.75"
+                  visible="true"
                   material="shader: flat; src: #mindar-poster-source; transparent: true; opacity: 1;"
+                />
+                <a-plane
+                  ref={videoPlaneRef}
+                  position="0 0 0"
+                  width="1"
+                  height="0.75"
+                  rotation={`0 0 ${PROTOTYPE_PUZZLE.videoRotationDeg || 0}`}
+                  scale={`${PROTOTYPE_PUZZLE.videoFlipX ? '-1' : '1'} 1 1`}
+                  visible="false"
+                  material="shader: flat; src: #mindar-video-source; transparent: true; opacity: 1;"
                 />
               </a-entity>
             </a-scene>

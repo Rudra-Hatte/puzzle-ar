@@ -269,11 +269,12 @@ textarea {
   inset: 0;
   width: 100%;
   height: 100%;
-  object-fit: contain;
-  opacity: 0;
+  object-fit: cover;
+  opacity: 1;
   transition: opacity 0.2s ease;
   z-index: 1;
   background: #000;
+  display: block;
 }
 
 .camera-preview.ready {
@@ -283,12 +284,13 @@ textarea {
 .mindar-scene {
   position: absolute;
   inset: 0;
-  z-index: 2;
+  z-index: 3;
   width: 100% !important;
   height: 100% !important;
   min-height: 0;
   display: block;
   background: transparent !important;
+  pointer-events: none;
 }
 
 .mindar-scene video,
@@ -308,7 +310,7 @@ textarea {
   inset: 0 !important;
   width: 100% !important;
   height: 100% !important;
-  z-index: 2 !important;
+  z-index: 3 !important;
   background: transparent !important;
 }
 
