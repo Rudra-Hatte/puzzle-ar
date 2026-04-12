@@ -4,6 +4,15 @@ import { sortPlaybackSources } from '../utils/arUtils';
 
 const VIDEO_ASSET_ID = 'mindar-overlay-video';
 const DIRECT_SOURCE_TIMEOUT_MS = 4500;
+const LOCAL_FALLBACK_PUZZLE = {
+  id: 'local-convex-lens',
+  name: 'Convex Lens Puzzle',
+  description: 'Built-in puzzle demo',
+  markerId: 'convex-lens-001',
+  puzzleImageUrl: '/images/convex-lens.jpeg',
+  isActive: true,
+  playbackSources: [{ type: 'mp4', url: '/videos/convex-lens.mp4', priority: 10 }],
+};
 
 function ARScanner() {
   const sceneRef = useRef(null);
@@ -24,11 +33,9 @@ function ARScanner() {
   const [cameraReady, setCameraReady] = useState(false);
   const [isScanning, setIsScanning] = useState(false);
   const [puzzleDetected, setPuzzleDetected] = useState(false);
-  const [statusText, setStatusText] = useState('Preparing AR runtime...');
+  const [statusText, setStatusText] = useState('Preparing scanner...');
   const [cameraError, setCameraError] = useState('');
 
-  const [activePuzzle, setActivePuzzle] = useState(null);
-  const [activeSource, setActiveSource] = useState(null);
   const [videoState, setVideoState] = useState('idle');
   const [youtubeFallbackUrl, setYoutubeFallbackUrl] = useState('');
 
@@ -36,14 +43,6 @@ function ARScanner() {
     () => puzzles.find((puzzle) => String(puzzle.id) === String(selectedPuzzleId)) || null,
     [puzzles, selectedPuzzleId]
   );
-
-  const sourceLabel = useMemo(() => {
-    if (!activeSource) {
-      return 'none';
-    }
-
-    return activeSource.type || 'source';
-  }, [activeSource]);
 
   const stopOverlayVideo = useCallback(() => {
     const video = overlayVideoRef.current;
@@ -101,7 +100,7 @@ function ARScanner() {
     (sources, startIndex = 0) => {
       if (!Array.isArray(sources) || startIndex >= sources.length) {
         setVideoState('error');
-        setStatusText('No direct MP4/HLS source is available for this puzzle.');
+        setStatusText('Video could not be played.');
         return;
       }
 
@@ -116,11 +115,10 @@ function ARScanner() {
       const video = overlayVideoRef.current;
       if (!video) {
         setVideoState('error');
-        setStatusText('AR video asset is unavailable.');
+        setStatusText('Video layer is unavailable.');
         return;
       }
 
-      setActiveSource(source);
       setVideoState('loading');
 
       let resolved = false;
@@ -153,7 +151,7 @@ function ARScanner() {
         resolved = true;
         clearHandlers();
         setVideoState('playing');
-        setStatusText('Puzzle tracked. AR video is anchored and playing.');
+        setStatusText('Puzzle detected. Video is playing.');
       };
 
       video.pause();
@@ -194,9 +192,13 @@ function ARScanner() {
 
       setPuzzles(active);
       setSelectedPuzzleId(String(active[0].id));
-      setStatusText('Puzzle list loaded. Building marker target from puzzle image...');
+      setStatusText('Preparing puzzle target...');
     } catch (error) {
-      setCameraError(error.message || 'Failed to load active puzzles.');
+      // Fallback keeps scanner usable even if backend/CORS is temporarily unavailable.
+      setPuzzles([LOCAL_FALLBACK_PUZZLE]);
+      setSelectedPuzzleId(String(LOCAL_FALLBACK_PUZZLE.id));
+      setCameraError('');
+      setStatusText('Using built-in puzzle data. Point camera at the puzzle image.');
     } finally {
       setLoadingPuzzles(false);
     }
@@ -205,12 +207,11 @@ function ARScanner() {
   const resetScanner = useCallback(() => {
     stopOverlayVideo();
     setPuzzleDetected(false);
-    setActivePuzzle(null);
-    setActiveSource(null);
     setVideoState('idle');
+    setRebuildNonce((current) => current + 1);
 
     if (cameraReady) {
-      setStatusText('Point your camera at the puzzle image to lock tracking.');
+      setStatusText('Point your camera at the puzzle image.');
       setIsScanning(true);
       return;
     }
@@ -223,14 +224,14 @@ function ARScanner() {
     const timer = window.setInterval(() => {
       if (window.AFRAME && window.MINDAR?.IMAGE?.Compiler) {
         setRuntimeReady(true);
-        setStatusText('MindAR runtime is ready. Loading active puzzles...');
+        setStatusText('Loading puzzle...');
         window.clearInterval(timer);
         return;
       }
 
       retries += 1;
       if (retries > 40) {
-        setCameraError('MindAR runtime failed to load. Check network and refresh.');
+        setCameraError('Could not load scanner runtime. Refresh and try again.');
         window.clearInterval(timer);
       }
     }, 200);
@@ -261,12 +262,10 @@ function ARScanner() {
       setCameraReady(false);
       setIsScanning(false);
       setPuzzleDetected(false);
-      setActivePuzzle(null);
-      setActiveSource(null);
       setVideoState('idle');
       setYoutubeFallbackUrl('');
       setCameraError('');
-      setStatusText('Compiling target from puzzle image. Hold on...');
+      setStatusText('Preparing camera...');
 
       try {
         const nextUrl = await compileTargetFromImage(selectedPuzzle.puzzleImageUrl);
@@ -279,10 +278,10 @@ function ARScanner() {
         revokeCompiledUrl();
         compiledBlobUrlRef.current = nextUrl;
         setCompiledTargetUrl(nextUrl);
-        setStatusText('Target ready. Point camera at the puzzle to start AR.');
+        setStatusText('Camera is starting...');
       } catch (error) {
         if (!canceled) {
-          setCameraError(error.message || 'Failed to compile puzzle image target.');
+          setCameraError(error.message || 'Could not prepare puzzle target.');
         }
       } finally {
         if (!canceled) {
@@ -309,12 +308,12 @@ function ARScanner() {
     const onReady = () => {
       setCameraReady(true);
       setIsScanning(true);
-      setStatusText('Scanner is live. Move closer until the puzzle locks.');
+      setStatusText('Camera ready. Point at the puzzle image.');
     };
 
     const onError = () => {
-      setCameraError('AR camera failed to initialize.');
-      setStatusText('Camera initialization failed.');
+      setCameraError('Could not open camera. Allow camera permission and retry.');
+      setStatusText('Camera failed to start.');
     };
 
     const onFound = () => {
@@ -322,14 +321,13 @@ function ARScanner() {
 
       setPuzzleDetected(true);
       setIsScanning(false);
-      setActivePuzzle(selectedPuzzle);
       playFromSources(sortedSources, 0);
     };
 
     const onLost = () => {
       setPuzzleDetected(false);
       setIsScanning(true);
-      setStatusText('Target lost. Point back at the puzzle image.');
+      setStatusText('Puzzle not in view. Point back at the image.');
       stopOverlayVideo();
       setVideoState('idle');
     };
@@ -371,57 +369,18 @@ function ARScanner() {
       <div className="scanner-panel card">
         <header className="scanner-header">
           <div>
-            <h1>Puzzle AR Scanner</h1>
-            <p>
-              Professional puzzle-only AR. MindAR now tracks the puzzle image directly with no QR fallback.
-            </p>
+            <h1>Puzzle Scanner</h1>
+            <p>Point camera at the puzzle image and the video will play automatically.</p>
           </div>
 
           <div className="scanner-toolbar">
-            <label>
-              Puzzle Target
-              <select
-                value={selectedPuzzleId}
-                onChange={(event) => setSelectedPuzzleId(event.target.value)}
-                disabled={loadingPuzzles || compilingTarget || puzzles.length <= 1}
-              >
-                {puzzles.map((puzzle) => (
-                  <option key={puzzle.id} value={puzzle.id}>
-                    {puzzle.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <button
-              type="button"
-              className="btn"
-              disabled={compilingTarget || !selectedPuzzle}
-              onClick={() => {
-                setRebuildNonce((current) => current + 1);
-              }}
-            >
-              Rebuild Target
-            </button>
-
             <button type="button" className="btn btn-primary" onClick={resetScanner}>
               Rescan
             </button>
           </div>
         </header>
 
-        <div className="status-row">
-          <span className={`status-pill ${runtimeReady ? 'ok' : 'pending'}`}>
-            {runtimeReady ? 'MindAR Ready' : 'Loading Runtime'}
-          </span>
-          <span className={`status-pill ${cameraReady ? 'ok' : 'pending'}`}>
-            {cameraReady ? 'Camera Ready' : 'Camera Starting'}
-          </span>
-          <span className={`status-pill ${puzzleDetected ? 'ok' : isScanning ? 'pending' : ''}`}>
-            {puzzleDetected ? 'Puzzle Locked' : isScanning ? 'Scanning' : 'Standby'}
-          </span>
-          <span className="status-detail">{statusText}</span>
-        </div>
+        <p className="status-detail">{statusText}</p>
 
         {compilingTarget && (
           <div className="compile-progress" aria-label="target compile progress">
@@ -433,11 +392,7 @@ function ARScanner() {
           {!runtimeReady || loadingPuzzles || compilingTarget || !compiledTargetUrl ? (
             <div className="stage-loading">
               <h3>Preparing Scanner</h3>
-              <p>
-                {compilingTarget
-                  ? `Compiling image target ${compileProgress}%`
-                  : 'Loading puzzle tracker and camera modules...'}
-              </p>
+              <p>{compilingTarget ? `Preparing target ${compileProgress}%` : 'Getting camera ready...'}</p>
             </div>
           ) : (
             <>
@@ -478,27 +433,28 @@ function ARScanner() {
               {isScanning && !puzzleDetected && !cameraError && (
                 <div className="scan-overlay">
                   <div className="scan-frame">
-                    <p>Point camera to the selected puzzle image</p>
-                    <small>Keep the full puzzle in frame with good lighting</small>
+                    <p>Point camera at your puzzle</p>
+                    <small>Keep full image in frame with good lighting</small>
                   </div>
                 </div>
               )}
             </>
           )}
 
-          {activePuzzle && (
-            <div className="overlay-badge">
-              <span>{activePuzzle.name}</span>
-              <small>Source: {sourceLabel}</small>
-            </div>
-          )}
-
           {cameraError && (
             <div className="stage-error">
               <h3>Scanner Error</h3>
               <p>{cameraError}</p>
-              <button type="button" className="btn btn-primary" onClick={loadPuzzles}>
-                Retry Setup
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => {
+                  setCameraError('');
+                  setRebuildNonce((current) => current + 1);
+                  loadPuzzles();
+                }}
+              >
+                Retry
               </button>
             </div>
           )}
@@ -521,30 +477,6 @@ function ARScanner() {
           </div>
         )}
 
-        {selectedPuzzle && (
-          <section className="puzzle-meta card">
-            <h3>Selected Puzzle</h3>
-            <p>{selectedPuzzle.description || 'No puzzle description provided yet.'}</p>
-            <div className="meta-grid">
-              <div>
-                <strong>Marker ID</strong>
-                <span>{selectedPuzzle.markerId || 'auto-runtime target'}</span>
-              </div>
-              <div>
-                <strong>Image Source</strong>
-                <span>{selectedPuzzle.puzzleImageUrl || 'missing'}</span>
-              </div>
-              <div>
-                <strong>Playback Sources</strong>
-                <span>{selectedPuzzle.playbackSources?.length || 0}</span>
-              </div>
-              <div>
-                <strong>Status</strong>
-                <span>{selectedPuzzle.isActive ? 'active' : 'inactive'}</span>
-              </div>
-            </div>
-          </section>
-        )}
       </div>
     </section>
   );
