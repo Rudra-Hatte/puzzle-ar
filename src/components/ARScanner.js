@@ -1,22 +1,26 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { listActivePuzzles } from '../services/puzzleService';
-import { sortPlaybackSources } from '../utils/arUtils';
 
-const PROCESS_INTERVAL_MS = 140;
-const API_TIMEOUT_MS = 3000;
-const OPENCV_WAIT_TIMEOUT_MS = 20000;
-const MAX_CAMERA_SIDE = 720;
-const MAX_REFERENCE_SIDE = 520;
+const PROCESS_INTERVAL_MS = 180;
+const OPENCV_WAIT_TIMEOUT_MS = 9000;
+const MAX_CAMERA_SIDE = 540;
+const MAX_REFERENCE_SIDE = 460;
 const DEBUG_UI_INTERVAL_MS = 250;
+const OPENCV_SCRIPT_URLS = [
+  'https://docs.opencv.org/4.9.0/opencv.js',
+  'https://docs.opencv.org/4.x/opencv.js',
+  'https://cdn.jsdelivr.net/npm/@techstark/opencv-js@4.9.0/dist/opencv.js',
+  'https://unpkg.com/@techstark/opencv-js@4.9.0/dist/opencv.js',
+];
+const MIN_GOOD_MATCHES = 16;
+const MIN_INLIERS = 12;
 
-const LOCAL_FALLBACK_PUZZLE = {
-  id: 'local-convex-lens',
+const PROTOTYPE_PUZZLE = {
+  id: 'prototype-convex-lens',
   name: 'Convex Lens Puzzle',
-  description: 'Built-in puzzle demo',
+  description: 'Single puzzle prototype mode',
   markerId: 'convex-lens-001',
   puzzleImageUrl: '/images/convex-lens.jpeg',
-  isActive: true,
-  playbackSources: [{ type: 'mp4', url: '/videos/convex-lens.mp4', priority: 10 }],
+  videoUrl: '/videos/convex-lens.mp4',
 };
 
 function createInitialDebugInfo() {
@@ -57,13 +61,73 @@ function loadImage(url) {
   });
 }
 
-function waitForOpenCvRuntime(timeoutMs = OPENCV_WAIT_TIMEOUT_MS) {
+function loadScript(url, timeoutMs) {
   return new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.async = true;
+    script.src = url;
+
+    const timeoutId = window.setTimeout(() => {
+      cleanup();
+      reject(new Error(`Script load timeout: ${url}`));
+    }, timeoutMs);
+
+    const cleanup = () => {
+      window.clearTimeout(timeoutId);
+      script.onload = null;
+      script.onerror = null;
+    };
+
+    script.onload = () => {
+      cleanup();
+      resolve();
+    };
+
+    script.onerror = () => {
+      cleanup();
+      script.remove();
+      reject(new Error(`Script load failed: ${url}`));
+    };
+
+    document.head.appendChild(script);
+  });
+}
+
+async function ensureOpenCvScriptLoaded(timeoutMs = OPENCV_WAIT_TIMEOUT_MS) {
+  if (window.cv) {
+    return;
+  }
+
+  const existingScript = Array.from(document.scripts).find((script) =>
+    /opencv\.js/i.test(script.src || '')
+  );
+
+  if (existingScript) {
+    return;
+  }
+
+  let lastError = null;
+  for (const url of OPENCV_SCRIPT_URLS) {
+    try {
+      await loadScript(url, timeoutMs);
+      return;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  throw lastError || new Error('Unable to load OpenCV script.');
+}
+
+function waitForOpenCvRuntime(timeoutMs = OPENCV_WAIT_TIMEOUT_MS) {
+  return ensureOpenCvScriptLoaded(timeoutMs).then(
+    () =>
+      new Promise((resolve, reject) => {
     let finished = false;
     const timeoutId = window.setTimeout(() => {
       if (!finished) {
         finished = true;
-        reject(new Error('OpenCV runtime did not load. Refresh and retry.'));
+          reject(new Error('OpenCV runtime did not load. Disable Brave shields and retry.'));
       }
     }, timeoutMs);
 
@@ -83,25 +147,26 @@ function waitForOpenCvRuntime(timeoutMs = OPENCV_WAIT_TIMEOUT_MS) {
       }
     };
 
-    if (window.cv && !window.cv.Mat) {
-      window.cv.onRuntimeInitialized = complete;
-    }
-
-    checkRuntime();
-
-    const pollId = window.setInterval(() => {
-      if (finished) {
-        window.clearInterval(pollId);
-        return;
-      }
-
       if (window.cv && !window.cv.Mat) {
         window.cv.onRuntimeInitialized = complete;
       }
 
       checkRuntime();
-    }, 100);
-  });
+
+      const pollId = window.setInterval(() => {
+        if (finished) {
+          window.clearInterval(pollId);
+          return;
+        }
+
+        if (window.cv && !window.cv.Mat) {
+          window.cv.onRuntimeInitialized = complete;
+        }
+
+        checkRuntime();
+      }, 100);
+    })
+  );
 }
 
 function computeScaledSize(width, height, maxSide) {
@@ -117,11 +182,6 @@ function computeScaledSize(width, height, maxSide) {
   };
 }
 
-function pickPlayableSource(puzzle) {
-  const sources = sortPlaybackSources(puzzle.playbackSources || []);
-  return sources.find((source) => source.type !== 'youtube') || null;
-}
-
 function ARScanner() {
   const cameraRef = useRef(null);
   const overlayCanvasRef = useRef(null);
@@ -134,16 +194,17 @@ function ARScanner() {
   const lastFrameAtRef = useRef(0);
   const streamRef = useRef(null);
   const cvResourcesRef = useRef(null);
-  const statusRef = useRef('Preparing scanner...');
+  const statusRef = useRef('Tap Start Scanner to begin.');
   const debugInfoRef = useRef(createInitialDebugInfo());
   const lastDebugUpdateAtRef = useRef(0);
 
-  const [statusText, setStatusText] = useState('Preparing scanner...');
+  const [statusText, setStatusText] = useState('Tap Start Scanner to begin.');
   const [cameraError, setCameraError] = useState('');
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [puzzleDetected, setPuzzleDetected] = useState(false);
+  const [scannerStarted, setScannerStarted] = useState(false);
   const [initNonce, setInitNonce] = useState(0);
-  const [debugVisible, setDebugVisible] = useState(true);
+  const [debugVisible, setDebugVisible] = useState(false);
   const [debugInfo, setDebugInfo] = useState(createInitialDebugInfo);
 
   const updateDebug = useCallback((partial, force = false) => {
@@ -222,26 +283,6 @@ function ARScanner() {
     cvResourcesRef.current = null;
   }, []);
 
-  const fetchPuzzleConfig = useCallback(async () => {
-    try {
-      const response = await Promise.race([
-        listActivePuzzles(),
-        new Promise((_, reject) => {
-          window.setTimeout(() => reject(new Error('Puzzle API timeout')), API_TIMEOUT_MS);
-        }),
-      ]);
-
-      const active = Array.isArray(response?.puzzles) ? response.puzzles : [];
-      if (active.length > 0) {
-        return active[0];
-      }
-    } catch (error) {
-      // Fall back below.
-    }
-
-    return LOCAL_FALLBACK_PUZZLE;
-  }, []);
-
   const prepareReference = useCallback(async (cv, imageUrl) => {
     const referenceImage = await loadImage(imageUrl);
     const referenceSize = computeScaledSize(
@@ -260,7 +301,7 @@ function ARScanner() {
     const refGray = new cv.Mat();
     cv.cvtColor(refRgba, refGray, cv.COLOR_RGBA2GRAY);
 
-    const orb = new cv.ORB(900);
+    const orb = new cv.ORB(650);
     const refKeypoints = new cv.KeyPointVector();
     const refDescriptors = new cv.Mat();
     const emptyMask = new cv.Mat();
@@ -280,6 +321,8 @@ function ARScanner() {
 
     const matcher = new cv.BFMatcher(cv.NORM_HAMMING, false);
 
+    const processingCanvas = processingCanvasRef.current;
+
     cvResourcesRef.current = {
       cv,
       orb,
@@ -290,8 +333,8 @@ function ARScanner() {
       refDescriptors,
       refWidth: referenceCanvas.width,
       refHeight: referenceCanvas.height,
-      frameWidth: 0,
-      frameHeight: 0,
+      frameWidth: processingCanvas?.width || 0,
+      frameHeight: processingCanvas?.height || 0,
       missStreak: 0,
     };
 
@@ -310,19 +353,47 @@ function ARScanner() {
       throw new Error('Camera preview element is unavailable.');
     }
 
-    const stream = await navigator.mediaDevices.getUserMedia({
-      video: {
-        facingMode: { ideal: 'environment' },
-      },
-      audio: false,
-    });
+    let stream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: { ideal: 'environment' },
+        },
+        audio: false,
+      });
+    } catch (error) {
+      stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+    }
 
     streamRef.current = stream;
     camera.srcObject = stream;
     camera.setAttribute('playsinline', 'true');
     camera.muted = true;
 
-    await camera.play();
+    await camera.play().catch(() => {});
+
+    if (camera.readyState < 2) {
+      await new Promise((resolve, reject) => {
+        const timeoutId = window.setTimeout(() => {
+          cleanup();
+          reject(new Error('Camera did not become ready. Please retry.'));
+        }, 4500);
+
+        const onReady = () => {
+          cleanup();
+          resolve();
+        };
+
+        const cleanup = () => {
+          window.clearTimeout(timeoutId);
+          camera.removeEventListener('loadeddata', onReady);
+          camera.removeEventListener('canplay', onReady);
+        };
+
+        camera.addEventListener('loadeddata', onReady, { once: true });
+        camera.addEventListener('canplay', onReady, { once: true });
+      });
+    }
 
     const frameSize = computeScaledSize(camera.videoWidth || 1280, camera.videoHeight || 720, MAX_CAMERA_SIDE);
     const processingCanvas = processingCanvasRef.current;
@@ -469,7 +540,7 @@ function ARScanner() {
 
         const pointCount = srcBuffer.length / 2;
         goodMatchCount = pointCount;
-        if (pointCount >= 18) {
+        if (pointCount >= MIN_GOOD_MATCHES) {
           srcPoints = cv.matFromArray(pointCount, 1, cv.CV_32FC2, srcBuffer);
           dstPoints = cv.matFromArray(pointCount, 1, cv.CV_32FC2, dstBuffer);
           inlierMask = new cv.Mat();
@@ -480,7 +551,7 @@ function ARScanner() {
             inlierCount = cv.countNonZero(inlierMask);
           }
 
-          if (homographyReady && inlierCount >= 14) {
+          if (homographyReady && inlierCount >= MIN_INLIERS) {
             detected = renderWarpedVideo(homography);
           }
         }
@@ -515,7 +586,7 @@ function ARScanner() {
           fpsEstimate: frameGap > 0 ? Math.round(1000 / Math.max(1, frameGap)) : 0,
           note: detected
             ? 'Locked on puzzle.'
-            : goodMatchCount >= 18
+            : goodMatchCount >= MIN_GOOD_MATCHES
               ? 'Matching features found. Adjust angle/lighting for lock.'
               : 'Searching for puzzle features...',
           cvReady: true,
@@ -564,6 +635,10 @@ function ARScanner() {
   }, [processFrame, stopLoop]);
 
   useEffect(() => {
+    if (!scannerStarted) {
+      return undefined;
+    }
+
     let canceled = false;
     const mountedSourceVideo = sourceVideoRef.current;
 
@@ -572,32 +647,24 @@ function ARScanner() {
         setLoading(true);
         setCameraError('');
         setPuzzleDetected(false);
-        resetDebug({ note: 'Loading puzzle...' });
+        resetDebug({ note: 'Starting camera...' });
         clearOverlay();
-        setStatus('Loading puzzle...');
-
-        const puzzle = await fetchPuzzleConfig();
-        const source = pickPlayableSource(puzzle);
+        setStatus('Starting camera...');
 
         updateDebug(
           {
-            puzzleName: puzzle.name || 'Puzzle',
-            note: 'Puzzle loaded. Preparing video source...',
+            puzzleName: PROTOTYPE_PUZZLE.name,
+            sourceUrl: PROTOTYPE_PUZZLE.videoUrl,
           },
           true
         );
 
-        if (!source) {
-          throw new Error('No playable video source found for this puzzle.');
-        }
+        await startCamera();
+        if (canceled) return;
 
-        updateDebug(
-          {
-            sourceUrl: source.url || '-',
-            note: 'Loading OpenCV runtime...',
-          },
-          true
-        );
+        setLoading(false);
+        setStatus('Camera ready. Loading scanner engine...');
+        updateDebug({ note: 'Camera ready. Loading OpenCV...' }, true);
 
         setStatus('Loading scanner engine...');
         const cv = await waitForOpenCvRuntime();
@@ -607,14 +674,13 @@ function ARScanner() {
 
         setStatus('Preparing puzzle reference...');
         disposeCvResources();
-        await prepareReference(cv, puzzle.puzzleImageUrl || LOCAL_FALLBACK_PUZZLE.puzzleImageUrl);
+        await prepareReference(cv, PROTOTYPE_PUZZLE.puzzleImageUrl);
         if (canceled) return;
 
         const sourceVideo = sourceVideoRef.current;
         if (sourceVideo) {
-          sourceVideo.src = source.url;
-          sourceVideo.crossOrigin = 'anonymous';
-          sourceVideo.preload = 'auto';
+          sourceVideo.src = PROTOTYPE_PUZZLE.videoUrl;
+          sourceVideo.preload = 'metadata';
           sourceVideo.muted = true;
           sourceVideo.loop = true;
           sourceVideo.playsInline = true;
@@ -622,12 +688,8 @@ function ARScanner() {
           sourceVideo.load();
         }
 
-        setStatus('Starting camera...');
-        await startCamera();
-        if (canceled) return;
-
         setStatus('Point camera at the puzzle image.');
-        setLoading(false);
+        updateDebug({ note: 'Tracker ready. Point camera at the puzzle image.' }, true);
         startLoop();
       } catch (error) {
         if (!canceled) {
@@ -655,10 +717,10 @@ function ARScanner() {
       }
     };
   }, [
+    scannerStarted,
     initNonce,
     clearOverlay,
     disposeCvResources,
-    fetchPuzzleConfig,
     prepareReference,
     resetDebug,
     setStatus,
@@ -669,12 +731,24 @@ function ARScanner() {
     updateDebug,
   ]);
 
+  const onStartScanner = useCallback(() => {
+    setCameraError('');
+    setScannerStarted(true);
+    setInitNonce((current) => current + 1);
+    setStatus('Starting camera...');
+    updateDebug({ note: 'Starting scanner...' }, true);
+  }, [setStatus, updateDebug]);
+
   const onRescan = useCallback(() => {
+    if (!scannerStarted) {
+      return;
+    }
+
     setPuzzleDetected(false);
     clearOverlay();
     setStatus('Point camera at the puzzle image.');
     updateDebug({ detected: false, missStreak: 0, note: 'Manual rescan triggered.' }, true);
-  }, [clearOverlay, setStatus, updateDebug]);
+  }, [clearOverlay, scannerStarted, setStatus, updateDebug]);
 
   return (
     <section className="scanner-page">
@@ -683,21 +757,34 @@ function ARScanner() {
           <div>
             <h1>Puzzle Scanner</h1>
             <p>Point camera at the puzzle image and the video will play automatically.</p>
+            <p className="hint-text">Prototype mode active: one puzzle is live now, multi-puzzle system is ready for next phase.</p>
           </div>
 
           <div className="scanner-toolbar">
             <button
               type="button"
-              className="btn btn-secondary"
-              onClick={() => {
-                setDebugVisible((current) => !current);
-              }}
+              className="btn btn-primary"
+              onClick={onStartScanner}
             >
-              {debugVisible ? 'Hide Debug' : 'Show Debug'}
+              {scannerStarted ? 'Restart Scanner' : 'Start Scanner'}
             </button>
-            <button type="button" className="btn btn-primary" onClick={onRescan}>
-              Rescan
-            </button>
+
+            {scannerStarted && (
+              <>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => {
+                    setDebugVisible((current) => !current);
+                  }}
+                >
+                  {debugVisible ? 'Hide Debug' : 'Show Debug'}
+                </button>
+                <button type="button" className="btn btn-primary" onClick={onRescan}>
+                  Rescan
+                </button>
+              </>
+            )}
           </div>
         </header>
 
@@ -714,7 +801,14 @@ function ARScanner() {
             </div>
           )}
 
-          {!loading && !cameraError && !puzzleDetected && (
+          {!scannerStarted && !loading && !cameraError && (
+            <div className="stage-loading">
+              <h3>Prototype Ready</h3>
+              <p>Tap Start Scanner to launch the one-puzzle demo.</p>
+            </div>
+          )}
+
+          {scannerStarted && !loading && !cameraError && !puzzleDetected && (
             <div className="scan-overlay">
               <div className="scan-frame">
                 <p>Point camera at your puzzle</p>
@@ -731,6 +825,7 @@ function ARScanner() {
                 type="button"
                 className="btn btn-primary"
                 onClick={() => {
+                  setScannerStarted(true);
                   setInitNonce((current) => current + 1);
                 }}
               >

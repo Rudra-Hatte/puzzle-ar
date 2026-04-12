@@ -1,10 +1,11 @@
-import React, { useEffect, useState } from 'react';
+import React, { Suspense, lazy, useEffect, useState } from 'react';
 import { BrowserRouter, Link, Route, Routes } from 'react-router-dom';
 import ARScanner from './components/ARScanner';
-import AdminLogin from './components/AdminLogin';
-import AdminDashboard from './components/AdminDashboard';
-import ProtectedRoute from './components/ProtectedRoute';
 import { isAuthenticated, logout } from './services/authService';
+
+const AdminLogin = lazy(() => import('./components/AdminLogin'));
+const AdminDashboard = lazy(() => import('./components/AdminDashboard'));
+const ProtectedRoute = lazy(() => import('./components/ProtectedRoute'));
 
 function App() {
   const [authed, setAuthed] = useState(isAuthenticated());
@@ -55,18 +56,20 @@ function App() {
         </header>
 
         <main className="app-content">
-          <Routes>
-            <Route path="/" element={<ARScanner />} />
-            <Route path="/admin/login" element={<AdminLogin />} />
-            <Route
-              path="/admin"
-              element={
-                <ProtectedRoute>
-                  <AdminDashboard />
-                </ProtectedRoute>
-              }
-            />
-          </Routes>
+          <Suspense fallback={<p className="status-detail">Loading page...</p>}>
+            <Routes>
+              <Route path="/" element={<ARScanner />} />
+              <Route path="/admin/login" element={<AdminLogin />} />
+              <Route
+                path="/admin"
+                element={
+                  <ProtectedRoute>
+                    <AdminDashboard />
+                  </ProtectedRoute>
+                }
+              />
+            </Routes>
+          </Suspense>
         </main>
       </div>
     </BrowserRouter>
