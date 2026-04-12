@@ -1,16 +1,18 @@
 services:
   - type: web
-    name: ar-physics-puzzle
+    name: ar-physics-puzzle-api
+    env: node
+    buildCommand: npm install
+    startCommand: node server/index.js
+    envVars:
+      - key: NODE_VERSION
+        value: 20
+
+  - type: web
+    name: ar-physics-puzzle-web
     env: static
-    buildCommand: npm run build
-    staticPublishPath: ./dist
-    headers:
-      - path: /*
-        name: Cross-Origin-Embedder-Policy
-        value: require-corp
-      - path: /*
-        name: Cross-Origin-Opener-Policy
-        value: same-origin
+    buildCommand: npm install && npm run build
+    staticPublishPath: ./build
     routes:
       - type: rewrite
         source: /*
