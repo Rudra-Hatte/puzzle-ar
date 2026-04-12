@@ -635,7 +635,14 @@ function ARScanner() {
       setPuzzleDetected(false);
       setMindarPlaneSource('poster');
       setStatus('Point camera at the puzzle image.');
-      updateDebug({ detected: false, note: 'Target lost. Waiting for puzzle.' }, true);
+      updateDebug(
+        {
+          detected: false,
+          playbackMode: 'idle',
+          note: 'Target lost. Waiting for puzzle.',
+        },
+        true
+      );
     };
 
     targetEntity.addEventListener('targetFound', onTargetFound);
@@ -839,9 +846,11 @@ function ARScanner() {
               className="mindar-scene"
               mindar-image={`imageTargetSrc: ${targetSrc}; autoStart: true; uiScanning: no; uiLoading: no;`}
               color-space="sRGB"
-              renderer="colorManagement: true, physicallyCorrectLights: false"
+              renderer="colorManagement: true; physicallyCorrectLights: false; alpha: true;"
               vr-mode-ui="enabled: false"
               device-orientation-permission-ui="enabled: false"
+              loading-screen="enabled: false"
+              style={{ position: 'absolute', inset: 0 }}
               embedded
             >
               <a-camera position="0 0 0" look-controls="enabled: false" />
