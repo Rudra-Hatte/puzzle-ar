@@ -5,7 +5,8 @@ import { sortPlaybackSources } from '../utils/arUtils';
 const VIDEO_ASSET_ID = 'mindar-overlay-video';
 const DIRECT_SOURCE_TIMEOUT_MS = 9000;
 const TARGET_CACHE_PREFIX = 'mindar-target-cache-v1:';
-const MAX_TARGET_IMAGE_SIDE = 960;
+const MAX_TARGET_IMAGE_SIDE = 640;
+const PUZZLE_API_TIMEOUT_MS = 3500;
 const LOCAL_FALLBACK_PUZZLE = {
   id: 'local-convex-lens',
   name: 'Convex Lens Puzzle',
@@ -82,6 +83,7 @@ function ARScanner() {
   const sceneRef = useRef(null);
   const targetRef = useRef(null);
   const overlayVideoRef = useRef(null);
+  const cameraPreviewRef = useRef(null);
   const compiledBlobUrlRef = useRef('');
 
   const [runtimeReady, setRuntimeReady] = useState(false);
@@ -99,6 +101,7 @@ function ARScanner() {
   const [puzzleDetected, setPuzzleDetected] = useState(false);
   const [statusText, setStatusText] = useState('Preparing scanner...');
   const [cameraError, setCameraError] = useState('');
+  const [cameraPreviewReady, setCameraPreviewReady] = useState(false);
 
   const [videoState, setVideoState] = useState('idle');
   const [youtubeFallbackUrl, setYoutubeFallbackUrl] = useState('');
@@ -133,8 +136,7 @@ function ARScanner() {
       image.onload = () => resolve(image);
       image.onerror = () => reject(new Error('Unable to load puzzle image for AR target compilation'));
 
-      const cacheBust = `${url}${url.includes('?') ? '&' : '?'}mindar=${Date.now()}`;
-      image.src = cacheBust;
+      image.src = url;
     });
   }, []);
 
@@ -282,9 +284,17 @@ function ARScanner() {
   const loadPuzzles = useCallback(async () => {
     setLoadingPuzzles(true);
     setCameraError('');
+    setPuzzles((current) => (current.length > 0 ? current : [LOCAL_FALLBACK_PUZZLE]));
+    setSelectedPuzzleId((current) => current || String(LOCAL_FALLBACK_PUZZLE.id));
+    setStatusText('Preparing puzzle target...');
 
     try {
-      const response = await listActivePuzzles();
+      const response = await Promise.race([
+        listActivePuzzles(),
+        new Promise((_, reject) => {
+          window.setTimeout(() => reject(new Error('Puzzle API timeout')), PUZZLE_API_TIMEOUT_MS);
+        }),
+      ]);
       const active = Array.isArray(response?.puzzles) ? response.puzzles : [];
 
       if (active.length === 0) {
@@ -295,11 +305,9 @@ function ARScanner() {
       setSelectedPuzzleId(String(active[0].id));
       setStatusText('Preparing puzzle target...');
     } catch (error) {
-      // Fallback keeps scanner usable even if backend/CORS is temporarily unavailable.
-      setPuzzles([LOCAL_FALLBACK_PUZZLE]);
-      setSelectedPuzzleId(String(LOCAL_FALLBACK_PUZZLE.id));
+      // Keep local fallback when API is slow/unavailable.
       setCameraError('');
-      setStatusText('Using built-in puzzle data. Point camera at the puzzle image.');
+      setStatusText('Using local puzzle data. Point camera at the puzzle image.');
     } finally {
       setLoadingPuzzles(false);
     }
@@ -309,7 +317,6 @@ function ARScanner() {
     stopOverlayVideo();
     setPuzzleDetected(false);
     setVideoState('idle');
-    setRebuildNonce((current) => current + 1);
 
     if (cameraReady) {
       setStatusText('Point your camera at the puzzle image.');
@@ -442,6 +449,21 @@ function ARScanner() {
     }
 
     const onReady = () => {
+      const cameraStreamVideo = Array.from(scene.querySelectorAll('video')).find(
+        (videoElement) => videoElement !== overlayVideoRef.current && videoElement.srcObject
+      );
+
+      if (cameraStreamVideo && cameraPreviewRef.current) {
+        cameraPreviewRef.current.srcObject = cameraStreamVideo.srcObject;
+        setCameraPreviewReady(true);
+        cameraPreviewRef.current
+          .play()
+          .then(() => {})
+          .catch(() => {
+            // Keep visible if stream is attached even when play() promise rejects.
+          });
+      }
+
       setCameraReady(true);
       setIsScanning(true);
       setStatusText('Camera ready. Point at the puzzle image.');
@@ -450,6 +472,7 @@ function ARScanner() {
     const onError = () => {
       setCameraError('Could not open camera. Allow camera permission and retry.');
       setStatusText('Camera failed to start.');
+      setCameraPreviewReady(false);
     };
 
     const onFound = () => {
@@ -483,9 +506,16 @@ function ARScanner() {
 
   useEffect(() => {
     const mountedScene = sceneRef.current;
+    const mountedPreviewVideo = cameraPreviewRef.current;
 
     return () => {
       stopOverlayVideo();
+      setCameraPreviewReady(false);
+
+      if (mountedPreviewVideo) {
+        mountedPreviewVideo.pause();
+        mountedPreviewVideo.srcObject = null;
+      }
 
       const system = mountedScene?.systems?.['mindar-image-system'];
       if (system) {
@@ -525,6 +555,14 @@ function ARScanner() {
         )}
 
         <div className="stage-wrap">
+          <video
+            ref={cameraPreviewRef}
+            className={`camera-preview ${cameraPreviewReady ? 'ready' : ''}`}
+            playsInline
+            muted
+            autoPlay
+          />
+
           {!runtimeReady || loadingPuzzles || compilingTarget || !compiledTargetUrl ? (
             <div className="stage-loading">
               <h3>Preparing Scanner</h3>
@@ -538,7 +576,7 @@ function ARScanner() {
                 class="mindar-scene"
                 mindar-image={`imageTargetSrc: ${compiledTargetUrl}; autoStart: true; uiLoading: no; uiScanning: no; uiError: no; maxTrack: 1; warmupTolerance: 5; missTolerance: 8;`}
                 color-space="sRGB"
-                renderer="precision: mediump; colorManagement: true; physicallyCorrectLights: true"
+                renderer="alpha: true; precision: mediump; colorManagement: true; physicallyCorrectLights: true"
                 vr-mode-ui="enabled: false"
                 device-orientation-permission-ui="enabled: false"
                 embedded
@@ -551,18 +589,20 @@ function ARScanner() {
                     playsInline
                     webkit-playsinline="true"
                     preload="auto"
+                    autoPlay
                     loop
-                    style={{ display: 'none' }}
+                    style={{ position: 'absolute', width: '1px', height: '1px', opacity: 0 }}
                   />
                 </a-assets>
                 <a-camera position="0 0 0" look-controls="enabled: false" />
                 <a-entity ref={targetRef} mindar-image-target="targetIndex: 0">
-                  <a-plane
+                  <a-video
                     visible={videoState === 'playing'}
+                    src={`#${VIDEO_ASSET_ID}`}
                     position="0 0 0"
                     width="1"
                     height="0.56"
-                    material={`shader: flat; src: #${VIDEO_ASSET_ID}; transparent: true; opacity: 1;`}
+                    material="shader: flat; transparent: true; opacity: 1;"
                   />
                 </a-entity>
               </a-scene>
