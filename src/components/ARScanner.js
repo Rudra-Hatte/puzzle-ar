@@ -24,8 +24,8 @@ const PROTOTYPE_PUZZLE = {
   mindTargetUrl: '/markers/convex-lens.mind',
   hlsUrl: '/videos/hls/convex-lens.m3u8',
   videoUrl: '/videos/convex-lens.mp4',
-  videoRotationDeg: -90,
-  videoFlipX: true,
+  videoRotationDeg: 0,
+  videoFlipX: false,
 };
 
 function createInitialDebugInfo() {
@@ -949,7 +949,7 @@ function ARScanner() {
                   width="1"
                   height="0.75"
                   visible="true"
-                  material="shader: flat; src: #mindar-poster-source; transparent: true; opacity: 1;"
+                  material="shader: flat; src: #mindar-poster-source; transparent: true; opacity: 1; side: double;"
                 />
                 <a-plane
                   ref={videoPlaneRef}
@@ -959,7 +959,7 @@ function ARScanner() {
                   rotation={`0 0 ${PROTOTYPE_PUZZLE.videoRotationDeg || 0}`}
                   scale={`${PROTOTYPE_PUZZLE.videoFlipX ? '-1' : '1'} 1 1`}
                   visible="false"
-                  material="shader: flat; src: #mindar-video-source; transparent: true; opacity: 1;"
+                  material="shader: flat; src: #mindar-video-source; transparent: true; opacity: 1; side: double;"
                 />
               </a-entity>
             </a-scene>
