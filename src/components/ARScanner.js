@@ -2,14 +2,20 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 
 const PROCESS_INTERVAL_MS = 180;
 const OPENCV_WAIT_TIMEOUT_MS = 9000;
+const HLS_WAIT_TIMEOUT_MS = 5000;
 const MAX_CAMERA_SIDE = 540;
 const MAX_REFERENCE_SIDE = 460;
 const DEBUG_UI_INTERVAL_MS = 250;
 const OPENCV_SCRIPT_URLS = [
+  '/opencv/opencv.js',
   'https://docs.opencv.org/4.9.0/opencv.js',
   'https://docs.opencv.org/4.x/opencv.js',
   'https://cdn.jsdelivr.net/npm/@techstark/opencv-js@4.9.0/dist/opencv.js',
   'https://unpkg.com/@techstark/opencv-js@4.9.0/dist/opencv.js',
+];
+const HLS_SCRIPT_URLS = [
+  'https://cdn.jsdelivr.net/npm/hls.js@1.5.17/dist/hls.min.js',
+  'https://unpkg.com/hls.js@1.5.17/dist/hls.min.js',
 ];
 const MIN_GOOD_MATCHES = 16;
 const MIN_INLIERS = 12;
@@ -20,6 +26,8 @@ const PROTOTYPE_PUZZLE = {
   description: 'Single puzzle prototype mode',
   markerId: 'convex-lens-001',
   puzzleImageUrl: '/images/convex-lens.jpeg',
+  posterImageUrl: '/images/ezgif-3c36c39b47974884-jpg/ezgif-frame-001.jpg',
+  hlsUrl: '/videos/hls/convex-lens.m3u8',
   videoUrl: '/videos/convex-lens.mp4',
 };
 
@@ -37,6 +45,8 @@ function createInitialDebugInfo() {
     homographyReady: false,
     missStreak: 0,
     detected: false,
+    playbackMode: 'idle',
+    videoReady: false,
     processMs: 0,
     fpsEstimate: 0,
     note: 'Initializing...',
@@ -119,53 +129,89 @@ async function ensureOpenCvScriptLoaded(timeoutMs = OPENCV_WAIT_TIMEOUT_MS) {
   throw lastError || new Error('Unable to load OpenCV script.');
 }
 
-function waitForOpenCvRuntime(timeoutMs = OPENCV_WAIT_TIMEOUT_MS) {
-  return ensureOpenCvScriptLoaded(timeoutMs).then(
-    () =>
-      new Promise((resolve, reject) => {
+async function ensureHlsScriptLoaded(timeoutMs = HLS_WAIT_TIMEOUT_MS) {
+  if (window.Hls) {
+    return window.Hls;
+  }
+
+  const existingScript = Array.from(document.scripts).find((script) => /hls(\.min)?\.js/i.test(script.src || ''));
+  if (existingScript) {
+    return window.Hls || null;
+  }
+
+  let lastError = null;
+  for (const url of HLS_SCRIPT_URLS) {
+    try {
+      await loadScript(url, timeoutMs);
+      return window.Hls || null;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  if (lastError) {
+    throw lastError;
+  }
+
+  return null;
+}
+
+function waitForCvObject(getCv, timeoutMs, timeoutMessage) {
+  return new Promise((resolve, reject) => {
     let finished = false;
     const timeoutId = window.setTimeout(() => {
-      if (!finished) {
-        finished = true;
-          reject(new Error('OpenCV runtime did not load. Disable Brave shields and retry.'));
+      if (finished) {
+        return;
       }
+
+      finished = true;
+      reject(new Error(timeoutMessage));
     }, timeoutMs);
 
-    const complete = () => {
+    const complete = (cv) => {
       if (finished) {
         return;
       }
 
       finished = true;
       window.clearTimeout(timeoutId);
-      resolve(window.cv);
+      resolve(cv);
     };
 
     const checkRuntime = () => {
-      if (window.cv && window.cv.Mat) {
-        complete();
+      const cv = getCv();
+      if (!cv) {
+        return;
       }
+
+      if (cv.Mat) {
+        complete(cv);
+        return;
+      }
+
+      cv.onRuntimeInitialized = () => complete(cv);
     };
 
-      if (window.cv && !window.cv.Mat) {
-        window.cv.onRuntimeInitialized = complete;
+    checkRuntime();
+
+    const pollId = window.setInterval(() => {
+      if (finished) {
+        window.clearInterval(pollId);
+        return;
       }
 
       checkRuntime();
+    }, 120);
+  });
+}
 
-      const pollId = window.setInterval(() => {
-        if (finished) {
-          window.clearInterval(pollId);
-          return;
-        }
-
-        if (window.cv && !window.cv.Mat) {
-          window.cv.onRuntimeInitialized = complete;
-        }
-
-        checkRuntime();
-      }, 100);
-    })
+function waitForOpenCvRuntime(timeoutMs = OPENCV_WAIT_TIMEOUT_MS) {
+  return ensureOpenCvScriptLoaded(timeoutMs).then(() =>
+    waitForCvObject(
+      () => window.cv,
+      timeoutMs,
+      'OpenCV runtime did not load. Disable Brave shields and retry.'
+    )
   );
 }
 
@@ -188,6 +234,10 @@ function ARScanner() {
   const processingCanvasRef = useRef(null);
   const sourceVideoRef = useRef(null);
   const sourceFrameCanvasRef = useRef(null);
+  const manualVideoRef = useRef(null);
+  const posterImageRef = useRef(null);
+  const hlsControllerRef = useRef(null);
+  const videoBufferedRef = useRef(false);
 
   const animationRef = useRef(0);
   const lastProcessAtRef = useRef(0);
@@ -203,6 +253,7 @@ function ARScanner() {
   const [loading, setLoading] = useState(false);
   const [puzzleDetected, setPuzzleDetected] = useState(false);
   const [scannerStarted, setScannerStarted] = useState(false);
+  const [manualDemoMode, setManualDemoMode] = useState(false);
   const [initNonce, setInitNonce] = useState(0);
   const [debugVisible, setDebugVisible] = useState(false);
   const [debugInfo, setDebugInfo] = useState(createInitialDebugInfo);
@@ -282,6 +333,115 @@ function ARScanner() {
 
     cvResourcesRef.current = null;
   }, []);
+
+  const clearHlsController = useCallback(() => {
+    if (hlsControllerRef.current) {
+      hlsControllerRef.current.destroy();
+      hlsControllerRef.current = null;
+    }
+  }, []);
+
+  const configureSourceVideo = useCallback(async () => {
+    const sourceVideo = sourceVideoRef.current;
+    if (!sourceVideo) {
+      throw new Error('Video layer is unavailable.');
+    }
+
+    clearHlsController();
+    videoBufferedRef.current = false;
+
+    sourceVideo.pause();
+    sourceVideo.removeAttribute('src');
+    sourceVideo.muted = true;
+    sourceVideo.loop = true;
+    sourceVideo.playsInline = true;
+    sourceVideo.setAttribute('playsinline', 'true');
+    sourceVideo.preload = 'auto';
+    sourceVideo.crossOrigin = 'anonymous';
+
+    sourceVideo.oncanplay = () => {
+      videoBufferedRef.current = true;
+      updateDebug({ videoReady: true, note: 'Video buffered. Ready to swap from poster.' }, true);
+    };
+    sourceVideo.oncanplaythrough = () => {
+      videoBufferedRef.current = true;
+      updateDebug({ videoReady: true, note: 'Video fully ready. Seamless playback enabled.' }, true);
+    };
+
+    let selectedSource = PROTOTYPE_PUZZLE.videoUrl;
+    let playbackMode = 'mp4';
+
+    if (PROTOTYPE_PUZZLE.hlsUrl) {
+      const nativeHlsSupported = Boolean(
+        sourceVideo.canPlayType('application/vnd.apple.mpegurl') ||
+          sourceVideo.canPlayType('application/x-mpegURL')
+      );
+
+      if (nativeHlsSupported) {
+        selectedSource = PROTOTYPE_PUZZLE.hlsUrl;
+        playbackMode = 'hls-native';
+      } else {
+        try {
+          const Hls = await ensureHlsScriptLoaded();
+          if (Hls && typeof Hls.isSupported === 'function' && Hls.isSupported()) {
+            const hls = new Hls({
+              enableWorker: true,
+              lowLatencyMode: true,
+              backBufferLength: 12,
+            });
+
+            hlsControllerRef.current = hls;
+            hls.attachMedia(sourceVideo);
+            hls.loadSource(PROTOTYPE_PUZZLE.hlsUrl);
+
+            hls.on(Hls.Events.MANIFEST_PARSED, () => {
+              updateDebug({ note: 'HLS manifest ready. Waiting for first segment...' }, true);
+            });
+
+            hls.on(Hls.Events.ERROR, (_event, data) => {
+              if (!data?.fatal) {
+                return;
+              }
+
+              clearHlsController();
+              sourceVideo.src = PROTOTYPE_PUZZLE.videoUrl;
+              sourceVideo.load();
+              updateDebug(
+                {
+                  sourceUrl: PROTOTYPE_PUZZLE.videoUrl,
+                  playbackMode: 'mp4',
+                  note: 'HLS error. Falling back to MP4.',
+                },
+                true
+              );
+            });
+
+            playbackMode = 'hls-js';
+            selectedSource = PROTOTYPE_PUZZLE.hlsUrl;
+          }
+        } catch (_error) {
+          playbackMode = 'mp4';
+          selectedSource = PROTOTYPE_PUZZLE.videoUrl;
+        }
+      }
+    }
+
+    if (playbackMode === 'hls-js') {
+      sourceVideo.load();
+    } else {
+      sourceVideo.src = selectedSource;
+      sourceVideo.load();
+    }
+
+    updateDebug(
+      {
+        sourceUrl: selectedSource,
+        playbackMode,
+        videoReady: false,
+      },
+      true
+    );
+  }, [clearHlsController, updateDebug]);
 
   const prepareReference = useCallback(async (cv, imageUrl) => {
     const referenceImage = await loadImage(imageUrl);
@@ -433,7 +593,8 @@ function ARScanner() {
       return false;
     }
 
-    if (sourceVideo.readyState < 2) {
+    const isVideoReady = videoBufferedRef.current || sourceVideo.readyState >= 2;
+    if (!isVideoReady) {
       return false;
     }
 
@@ -471,7 +632,47 @@ function ARScanner() {
     return true;
   }, []);
 
+  const renderWarpedPoster = useCallback((homography) => {
+    const resources = cvResourcesRef.current;
+    const sourceFrameCanvas = sourceFrameCanvasRef.current;
+    const overlayCanvas = overlayCanvasRef.current;
+    const posterImage = posterImageRef.current;
+
+    if (!resources || !sourceFrameCanvas || !overlayCanvas || !posterImage) {
+      return false;
+    }
+
+    sourceFrameCanvas.width = resources.refWidth;
+    sourceFrameCanvas.height = resources.refHeight;
+    const sourceContext = sourceFrameCanvas.getContext('2d');
+    sourceContext.drawImage(posterImage, 0, 0, sourceFrameCanvas.width, sourceFrameCanvas.height);
+
+    const { cv } = resources;
+    const sourceMat = cv.imread(sourceFrameCanvas);
+    const warped = new cv.Mat.zeros(resources.frameHeight, resources.frameWidth, cv.CV_8UC4);
+
+    cv.warpPerspective(
+      sourceMat,
+      warped,
+      homography,
+      new cv.Size(resources.frameWidth, resources.frameHeight),
+      cv.INTER_LINEAR,
+      cv.BORDER_CONSTANT,
+      new cv.Scalar(0, 0, 0, 0)
+    );
+
+    cv.imshow(overlayCanvas, warped);
+
+    sourceMat.delete();
+    warped.delete();
+    return true;
+  }, []);
+
   const processFrame = useCallback(() => {
+    if (manualDemoMode) {
+      return;
+    }
+
     const resources = cvResourcesRef.current;
     const camera = cameraRef.current;
     const processingCanvas = processingCanvasRef.current;
@@ -492,6 +693,7 @@ function ARScanner() {
     let inlierCount = 0;
     let homographyReady = false;
     let detected = false;
+    let detectionMode = 'none';
 
     let frameRgba = null;
     let frameGray = null;
@@ -552,7 +754,13 @@ function ARScanner() {
           }
 
           if (homographyReady && inlierCount >= MIN_INLIERS) {
-            detected = renderWarpedVideo(homography);
+            if (renderWarpedVideo(homography)) {
+              detected = true;
+              detectionMode = 'video';
+            } else if (renderWarpedPoster(homography)) {
+              detected = true;
+              detectionMode = 'poster';
+            }
           }
         }
       }
@@ -561,7 +769,12 @@ function ARScanner() {
         resources.missStreak = 0;
         if (!puzzleDetected) {
           setPuzzleDetected(true);
+        }
+
+        if (detectionMode === 'video') {
           setStatus('Puzzle detected. Video is playing.');
+        } else {
+          setStatus('Puzzle detected. Showing poster while video buffers...');
         }
       } else {
         resources.missStreak += 1;
@@ -582,10 +795,14 @@ function ARScanner() {
           inliers: inlierCount,
           missStreak: resources.missStreak,
           detected,
+          playbackMode: detectionMode === 'none' ? debugInfoRef.current.playbackMode : detectionMode,
+          videoReady: videoBufferedRef.current,
           processMs: Number(processMs.toFixed(1)),
           fpsEstimate: frameGap > 0 ? Math.round(1000 / Math.max(1, frameGap)) : 0,
           note: detected
-            ? 'Locked on puzzle.'
+            ? detectionMode === 'video'
+              ? 'Locked on puzzle. Video playing.'
+              : 'Locked on puzzle. Poster shown while video buffers.'
             : goodMatchCount >= MIN_GOOD_MATCHES
               ? 'Matching features found. Adjust angle/lighting for lock.'
               : 'Searching for puzzle features...',
@@ -602,6 +819,7 @@ function ARScanner() {
         {
           note: 'Frame processing hiccup. Continuing scan...',
           detected: false,
+          playbackMode: 'error',
         },
         false
       );
@@ -616,7 +834,15 @@ function ARScanner() {
       if (inlierMask) inlierMask.delete();
       if (homography) homography.delete();
     }
-  }, [clearOverlay, puzzleDetected, renderWarpedVideo, setStatus, updateDebug]);
+  }, [
+    clearOverlay,
+    manualDemoMode,
+    puzzleDetected,
+    renderWarpedPoster,
+    renderWarpedVideo,
+    setStatus,
+    updateDebug,
+  ]);
 
   const startLoop = useCallback(() => {
     stopLoop();
@@ -647,6 +873,7 @@ function ARScanner() {
         setLoading(true);
         setCameraError('');
         setPuzzleDetected(false);
+        setManualDemoMode(false);
         resetDebug({ note: 'Starting camera...' });
         clearOverlay();
         setStatus('Starting camera...');
@@ -654,7 +881,7 @@ function ARScanner() {
         updateDebug(
           {
             puzzleName: PROTOTYPE_PUZZLE.name,
-            sourceUrl: PROTOTYPE_PUZZLE.videoUrl,
+            sourceUrl: PROTOTYPE_PUZZLE.hlsUrl || PROTOTYPE_PUZZLE.videoUrl,
           },
           true
         );
@@ -677,16 +904,12 @@ function ARScanner() {
         await prepareReference(cv, PROTOTYPE_PUZZLE.puzzleImageUrl);
         if (canceled) return;
 
-        const sourceVideo = sourceVideoRef.current;
-        if (sourceVideo) {
-          sourceVideo.src = PROTOTYPE_PUZZLE.videoUrl;
-          sourceVideo.preload = 'metadata';
-          sourceVideo.muted = true;
-          sourceVideo.loop = true;
-          sourceVideo.playsInline = true;
-          sourceVideo.setAttribute('playsinline', 'true');
-          sourceVideo.load();
-        }
+        setStatus('Preparing poster frame...');
+        posterImageRef.current = await loadImage(PROTOTYPE_PUZZLE.posterImageUrl || PROTOTYPE_PUZZLE.puzzleImageUrl);
+        updateDebug({ note: 'Poster frame ready. Buffering video source...' }, true);
+
+        await configureSourceVideo();
+        if (canceled) return;
 
         setStatus('Point camera at the puzzle image.');
         updateDebug({ note: 'Tracker ready. Point camera at the puzzle image.' }, true);
@@ -709,9 +932,14 @@ function ARScanner() {
       stopStream();
       clearOverlay();
       disposeCvResources();
+      clearHlsController();
+      posterImageRef.current = null;
+      videoBufferedRef.current = false;
 
       if (mountedSourceVideo) {
         mountedSourceVideo.pause();
+        mountedSourceVideo.oncanplay = null;
+        mountedSourceVideo.oncanplaythrough = null;
         mountedSourceVideo.removeAttribute('src');
         mountedSourceVideo.load();
       }
@@ -720,6 +948,8 @@ function ARScanner() {
     scannerStarted,
     initNonce,
     clearOverlay,
+    clearHlsController,
+    configureSourceVideo,
     disposeCvResources,
     prepareReference,
     resetDebug,
@@ -733,22 +963,62 @@ function ARScanner() {
 
   const onStartScanner = useCallback(() => {
     setCameraError('');
+    setManualDemoMode(false);
     setScannerStarted(true);
     setInitNonce((current) => current + 1);
     setStatus('Starting camera...');
     updateDebug({ note: 'Starting scanner...' }, true);
   }, [setStatus, updateDebug]);
 
+  const onManualPlay = useCallback(() => {
+    if (!scannerStarted || loading) {
+      return;
+    }
+
+    stopLoop();
+    clearOverlay();
+    setManualDemoMode(true);
+    setPuzzleDetected(true);
+    setStatus('Manual demo mode playing video.');
+    updateDebug(
+      {
+        detected: true,
+        playbackMode: 'manual',
+        videoReady: true,
+        note: 'Manual demo fallback enabled. Auto tracking paused.',
+      },
+      true
+    );
+  }, [clearOverlay, loading, scannerStarted, setStatus, stopLoop, updateDebug]);
+
   const onRescan = useCallback(() => {
     if (!scannerStarted) {
       return;
     }
 
+    setManualDemoMode(false);
     setPuzzleDetected(false);
     clearOverlay();
     setStatus('Point camera at the puzzle image.');
-    updateDebug({ detected: false, missStreak: 0, note: 'Manual rescan triggered.' }, true);
-  }, [clearOverlay, scannerStarted, setStatus, updateDebug]);
+    startLoop();
+    updateDebug({ detected: false, missStreak: 0, playbackMode: 'idle', note: 'Manual rescan triggered.' }, true);
+  }, [clearOverlay, scannerStarted, setStatus, startLoop, updateDebug]);
+
+  useEffect(() => {
+    if (!manualDemoMode) {
+      return;
+    }
+
+    const manualVideo = manualVideoRef.current;
+    if (!manualVideo) {
+      return;
+    }
+
+    manualVideo.muted = true;
+    manualVideo.playsInline = true;
+    manualVideo.setAttribute('playsinline', 'true');
+    manualVideo.play().catch(() => {});
+  }, [manualDemoMode]);
 
   return (
     <section className="scanner-page">
@@ -780,6 +1050,9 @@ function ARScanner() {
                 >
                   {debugVisible ? 'Hide Debug' : 'Show Debug'}
                 </button>
+                <button type="button" className="btn btn-secondary" onClick={onManualPlay}>
+                  Play Demo
+                </button>
                 <button type="button" className="btn btn-primary" onClick={onRescan}>
                   Rescan
                 </button>
@@ -789,51 +1062,6 @@ function ARScanner() {
         </header>
 
         <p className="status-detail">{statusText}</p>
-
-        <div className="stage-wrap">
-          <video ref={cameraRef} className="camera-preview ready" playsInline muted autoPlay />
-          <canvas ref={overlayCanvasRef} className="opencv-overlay" />
-
-          {loading && (
-            <div className="stage-loading">
-              <h3>Preparing Scanner</h3>
-              <p>Getting camera and puzzle tracker ready...</p>
-            </div>
-          )}
-
-          {!scannerStarted && !loading && !cameraError && (
-            <div className="stage-loading">
-              <h3>Prototype Ready</h3>
-              <p>Tap Start Scanner to launch the one-puzzle demo.</p>
-            </div>
-          )}
-
-          {scannerStarted && !loading && !cameraError && !puzzleDetected && (
-            <div className="scan-overlay">
-              <div className="scan-frame">
-                <p>Point camera at your puzzle</p>
-                <small>Keep full image in frame with good lighting</small>
-              </div>
-            </div>
-          )}
-
-          {cameraError && (
-            <div className="stage-error">
-              <h3>Scanner Error</h3>
-              <p>{cameraError}</p>
-              <button
-                type="button"
-                className="btn btn-primary"
-                onClick={() => {
-                  setScannerStarted(true);
-                  setInitNonce((current) => current + 1);
-                }}
-              >
-                Retry
-              </button>
-            </div>
-          )}
-        </div>
 
         {debugVisible && (
           <section className="debug-panel" aria-live="polite">
@@ -848,6 +1076,14 @@ function ARScanner() {
               <div>
                 <strong>OpenCV</strong>
                 <span>{debugInfo.cvReady ? 'Ready' : 'Loading'}</span>
+              </div>
+              <div>
+                <strong>Playback Mode</strong>
+                <span>{debugInfo.playbackMode}</span>
+              </div>
+              <div>
+                <strong>Video Ready</strong>
+                <span>{debugInfo.videoReady ? 'Yes' : 'No'}</span>
               </div>
               <div>
                 <strong>Frame</strong>
@@ -900,6 +1136,69 @@ function ARScanner() {
             </div>
           </section>
         )}
+
+        <div className="stage-wrap">
+          <video ref={cameraRef} className="camera-preview ready" playsInline muted autoPlay />
+          <canvas ref={overlayCanvasRef} className="opencv-overlay" />
+
+          {loading && (
+            <div className="stage-loading">
+              <h3>Preparing Scanner</h3>
+              <p>Getting camera and puzzle tracker ready...</p>
+            </div>
+          )}
+
+          {!scannerStarted && !loading && !cameraError && (
+            <div className="stage-loading">
+              <h3>Prototype Ready</h3>
+              <p>Tap Start Scanner to launch the one-puzzle demo.</p>
+            </div>
+          )}
+
+          {scannerStarted && !loading && !cameraError && !puzzleDetected && (
+            <div className="scan-overlay">
+              <div className="scan-frame">
+                <p>Point camera at your puzzle</p>
+                <small>Keep full image in frame with good lighting</small>
+              </div>
+            </div>
+          )}
+
+          {scannerStarted && manualDemoMode && !cameraError && (
+            <div className="ar-overlay">
+              <video
+                ref={manualVideoRef}
+                className="ar-video visible"
+                src={PROTOTYPE_PUZZLE.videoUrl}
+                autoPlay
+                muted
+                loop
+                playsInline
+              />
+              <div className="overlay-badge">
+                <span>Demo Mode</span>
+                <small>Manual fallback active</small>
+              </div>
+            </div>
+          )}
+
+          {cameraError && (
+            <div className="stage-error">
+              <h3>Scanner Error</h3>
+              <p>{cameraError}</p>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => {
+                  setScannerStarted(true);
+                  setInitNonce((current) => current + 1);
+                }}
+              >
+                Retry
+              </button>
+            </div>
+          )}
+        </div>
 
         <canvas ref={processingCanvasRef} style={{ display: 'none' }} />
         <canvas ref={sourceFrameCanvasRef} style={{ display: 'none' }} />
