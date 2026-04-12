@@ -7,6 +7,7 @@ const API_TIMEOUT_MS = 3000;
 const OPENCV_WAIT_TIMEOUT_MS = 20000;
 const MAX_CAMERA_SIDE = 720;
 const MAX_REFERENCE_SIDE = 520;
+const DEBUG_UI_INTERVAL_MS = 250;
 
 const LOCAL_FALLBACK_PUZZLE = {
   id: 'local-convex-lens',
@@ -17,6 +18,34 @@ const LOCAL_FALLBACK_PUZZLE = {
   isActive: true,
   playbackSources: [{ type: 'mp4', url: '/videos/convex-lens.mp4', priority: 10 }],
 };
+
+function createInitialDebugInfo() {
+  return {
+    puzzleName: '-',
+    sourceUrl: '-',
+    cvReady: false,
+    frameWidth: 0,
+    frameHeight: 0,
+    referenceFeatures: 0,
+    frameFeatures: 0,
+    goodMatches: 0,
+    inliers: 0,
+    homographyReady: false,
+    missStreak: 0,
+    detected: false,
+    processMs: 0,
+    fpsEstimate: 0,
+    note: 'Initializing...',
+  };
+}
+
+function nowMs() {
+  if (typeof performance !== 'undefined' && typeof performance.now === 'function') {
+    return performance.now();
+  }
+
+  return Date.now();
+}
 
 function loadImage(url) {
   return new Promise((resolve, reject) => {
@@ -102,15 +131,39 @@ function ARScanner() {
 
   const animationRef = useRef(0);
   const lastProcessAtRef = useRef(0);
+  const lastFrameAtRef = useRef(0);
   const streamRef = useRef(null);
   const cvResourcesRef = useRef(null);
   const statusRef = useRef('Preparing scanner...');
+  const debugInfoRef = useRef(createInitialDebugInfo());
+  const lastDebugUpdateAtRef = useRef(0);
 
   const [statusText, setStatusText] = useState('Preparing scanner...');
   const [cameraError, setCameraError] = useState('');
   const [loading, setLoading] = useState(true);
   const [puzzleDetected, setPuzzleDetected] = useState(false);
   const [initNonce, setInitNonce] = useState(0);
+  const [debugVisible, setDebugVisible] = useState(true);
+  const [debugInfo, setDebugInfo] = useState(createInitialDebugInfo);
+
+  const updateDebug = useCallback((partial, force = false) => {
+    const nextInfo = { ...debugInfoRef.current, ...partial };
+    debugInfoRef.current = nextInfo;
+
+    const currentTime = nowMs();
+    if (force || currentTime - lastDebugUpdateAtRef.current >= DEBUG_UI_INTERVAL_MS) {
+      lastDebugUpdateAtRef.current = currentTime;
+      setDebugInfo(nextInfo);
+    }
+  }, []);
+
+  const resetDebug = useCallback((partial = {}) => {
+    const nextInfo = { ...createInitialDebugInfo(), ...partial };
+    debugInfoRef.current = nextInfo;
+    lastDebugUpdateAtRef.current = 0;
+    lastFrameAtRef.current = 0;
+    setDebugInfo(nextInfo);
+  }, []);
 
   const setStatus = useCallback((nextText) => {
     if (statusRef.current !== nextText) {
@@ -241,7 +294,15 @@ function ARScanner() {
       frameHeight: 0,
       missStreak: 0,
     };
-  }, []);
+
+    updateDebug(
+      {
+        referenceFeatures: refKeypoints.size(),
+        note: 'Reference features extracted.',
+      },
+      true
+    );
+  }, [updateDebug]);
 
   const startCamera = useCallback(async () => {
     const camera = cameraRef.current;
@@ -280,7 +341,16 @@ function ARScanner() {
       cvResourcesRef.current.frameWidth = frameSize.width;
       cvResourcesRef.current.frameHeight = frameSize.height;
     }
-  }, []);
+
+    updateDebug(
+      {
+        frameWidth: frameSize.width,
+        frameHeight: frameSize.height,
+        note: 'Camera ready. Searching for puzzle...',
+      },
+      true
+    );
+  }, [updateDebug]);
 
   const renderWarpedVideo = useCallback((homography) => {
     const resources = cvResourcesRef.current;
@@ -342,6 +412,15 @@ function ARScanner() {
     processingContext.drawImage(camera, 0, 0, processingCanvas.width, processingCanvas.height);
 
     const { cv, orb, matcher, refKeypoints, refDescriptors, emptyMask } = resources;
+    const frameStart = nowMs();
+    const frameGap = lastFrameAtRef.current ? frameStart - lastFrameAtRef.current : 0;
+    lastFrameAtRef.current = frameStart;
+
+    let frameFeatureCount = 0;
+    let goodMatchCount = 0;
+    let inlierCount = 0;
+    let homographyReady = false;
+    let detected = false;
 
     let frameRgba = null;
     let frameGray = null;
@@ -361,8 +440,7 @@ function ARScanner() {
       frameKeypoints = new cv.KeyPointVector();
       frameDescriptors = new cv.Mat();
       orb.detectAndCompute(frameGray, emptyMask, frameKeypoints, frameDescriptors);
-
-      let detected = false;
+      frameFeatureCount = frameKeypoints.size();
 
       if (!frameDescriptors.empty()) {
         matches = new cv.DMatchVectorVector();
@@ -390,13 +468,19 @@ function ARScanner() {
         }
 
         const pointCount = srcBuffer.length / 2;
+        goodMatchCount = pointCount;
         if (pointCount >= 18) {
           srcPoints = cv.matFromArray(pointCount, 1, cv.CV_32FC2, srcBuffer);
           dstPoints = cv.matFromArray(pointCount, 1, cv.CV_32FC2, dstBuffer);
           inlierMask = new cv.Mat();
           homography = cv.findHomography(srcPoints, dstPoints, cv.RANSAC, 5, inlierMask);
+          homographyReady = !homography.empty();
 
-          if (!homography.empty() && cv.countNonZero(inlierMask) >= 14) {
+          if (!homography.empty()) {
+            inlierCount = cv.countNonZero(inlierMask);
+          }
+
+          if (homographyReady && inlierCount >= 14) {
             detected = renderWarpedVideo(homography);
           }
         }
@@ -418,8 +502,38 @@ function ARScanner() {
           }
         }
       }
+
+      const processMs = nowMs() - frameStart;
+      updateDebug(
+        {
+          frameFeatures: frameFeatureCount,
+          goodMatches: goodMatchCount,
+          inliers: inlierCount,
+          missStreak: resources.missStreak,
+          detected,
+          processMs: Number(processMs.toFixed(1)),
+          fpsEstimate: frameGap > 0 ? Math.round(1000 / Math.max(1, frameGap)) : 0,
+          note: detected
+            ? 'Locked on puzzle.'
+            : goodMatchCount >= 18
+              ? 'Matching features found. Adjust angle/lighting for lock.'
+              : 'Searching for puzzle features...',
+          cvReady: true,
+          frameWidth: resources.frameWidth,
+          frameHeight: resources.frameHeight,
+          homographyReady,
+        },
+        false
+      );
     } catch (error) {
       // Ignore per-frame processing errors and continue scanning.
+      updateDebug(
+        {
+          note: 'Frame processing hiccup. Continuing scan...',
+          detected: false,
+        },
+        false
+      );
     } finally {
       if (frameRgba) frameRgba.delete();
       if (frameGray) frameGray.delete();
@@ -431,7 +545,7 @@ function ARScanner() {
       if (inlierMask) inlierMask.delete();
       if (homography) homography.delete();
     }
-  }, [clearOverlay, puzzleDetected, renderWarpedVideo, setStatus]);
+  }, [clearOverlay, puzzleDetected, renderWarpedVideo, setStatus, updateDebug]);
 
   const startLoop = useCallback(() => {
     stopLoop();
@@ -458,19 +572,38 @@ function ARScanner() {
         setLoading(true);
         setCameraError('');
         setPuzzleDetected(false);
+        resetDebug({ note: 'Loading puzzle...' });
         clearOverlay();
         setStatus('Loading puzzle...');
 
         const puzzle = await fetchPuzzleConfig();
         const source = pickPlayableSource(puzzle);
 
+        updateDebug(
+          {
+            puzzleName: puzzle.name || 'Puzzle',
+            note: 'Puzzle loaded. Preparing video source...',
+          },
+          true
+        );
+
         if (!source) {
           throw new Error('No playable video source found for this puzzle.');
         }
 
+        updateDebug(
+          {
+            sourceUrl: source.url || '-',
+            note: 'Loading OpenCV runtime...',
+          },
+          true
+        );
+
         setStatus('Loading scanner engine...');
         const cv = await waitForOpenCvRuntime();
         if (canceled) return;
+
+        updateDebug({ cvReady: true, note: 'OpenCV ready. Building reference features...' }, true);
 
         setStatus('Preparing puzzle reference...');
         disposeCvResources();
@@ -501,6 +634,7 @@ function ARScanner() {
           setLoading(false);
           setCameraError(error.message || 'Failed to initialize scanner.');
           setStatus('Scanner initialization failed.');
+          updateDebug({ note: error.message || 'Scanner initialization failed.' }, true);
         }
       }
     };
@@ -526,18 +660,21 @@ function ARScanner() {
     disposeCvResources,
     fetchPuzzleConfig,
     prepareReference,
+    resetDebug,
     setStatus,
     startCamera,
     startLoop,
     stopLoop,
     stopStream,
+    updateDebug,
   ]);
 
   const onRescan = useCallback(() => {
     setPuzzleDetected(false);
     clearOverlay();
     setStatus('Point camera at the puzzle image.');
-  }, [clearOverlay, setStatus]);
+    updateDebug({ detected: false, missStreak: 0, note: 'Manual rescan triggered.' }, true);
+  }, [clearOverlay, setStatus, updateDebug]);
 
   return (
     <section className="scanner-page">
@@ -549,6 +686,15 @@ function ARScanner() {
           </div>
 
           <div className="scanner-toolbar">
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => {
+                setDebugVisible((current) => !current);
+              }}
+            >
+              {debugVisible ? 'Hide Debug' : 'Show Debug'}
+            </button>
             <button type="button" className="btn btn-primary" onClick={onRescan}>
               Rescan
             </button>
@@ -593,6 +739,72 @@ function ARScanner() {
             </div>
           )}
         </div>
+
+        {debugVisible && (
+          <section className="debug-panel" aria-live="polite">
+            <h3>OpenCV Debug</h3>
+            <p className="debug-note">{debugInfo.note}</p>
+
+            <div className="debug-grid">
+              <div>
+                <strong>Detected</strong>
+                <span>{debugInfo.detected ? 'YES' : 'NO'}</span>
+              </div>
+              <div>
+                <strong>OpenCV</strong>
+                <span>{debugInfo.cvReady ? 'Ready' : 'Loading'}</span>
+              </div>
+              <div>
+                <strong>Frame</strong>
+                <span>
+                  {debugInfo.frameWidth}x{debugInfo.frameHeight}
+                </span>
+              </div>
+              <div>
+                <strong>Reference Features</strong>
+                <span>{debugInfo.referenceFeatures}</span>
+              </div>
+              <div>
+                <strong>Frame Features</strong>
+                <span>{debugInfo.frameFeatures}</span>
+              </div>
+              <div>
+                <strong>Good Matches</strong>
+                <span>{debugInfo.goodMatches}</span>
+              </div>
+              <div>
+                <strong>Inliers</strong>
+                <span>{debugInfo.inliers}</span>
+              </div>
+              <div>
+                <strong>Homography</strong>
+                <span>{debugInfo.homographyReady ? 'Ready' : 'No'}</span>
+              </div>
+              <div>
+                <strong>Miss Streak</strong>
+                <span>{debugInfo.missStreak}</span>
+              </div>
+              <div>
+                <strong>Process</strong>
+                <span>{debugInfo.processMs} ms</span>
+              </div>
+              <div>
+                <strong>FPS Approx</strong>
+                <span>{debugInfo.fpsEstimate}</span>
+              </div>
+              <div className="debug-wide">
+                <strong>Puzzle</strong>
+                <span>{debugInfo.puzzleName}</span>
+              </div>
+              <div className="debug-wide">
+                <strong>Source</strong>
+                <span className="debug-ellipsis" title={debugInfo.sourceUrl}>
+                  {debugInfo.sourceUrl}
+                </span>
+              </div>
+            </div>
+          </section>
+        )}
 
         <canvas ref={processingCanvasRef} style={{ display: 'none' }} />
         <canvas ref={sourceFrameCanvasRef} style={{ display: 'none' }} />

@@ -106,6 +106,15 @@ a {
   background: linear-gradient(120deg, #64ebb8, #42cadf);
 }
 
+.btn-secondary {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.34);
+}
+
+.btn-secondary:hover {
+  background: rgba(255, 255, 255, 0.17);
+}
+
 .btn-danger {
   background: rgba(246, 79, 94, 0.2);
   border-color: rgba(246, 79, 94, 0.7);
@@ -337,6 +346,60 @@ textarea {
 .scan-frame p,
 .scan-frame small {
   margin: 0;
+}
+
+.debug-panel {
+  margin-top: 0.85rem;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(6, 14, 27, 0.65);
+  padding: 0.8rem;
+}
+
+.debug-panel h3,
+.debug-panel p {
+  margin: 0;
+}
+
+.debug-note {
+  margin-top: 0.25rem !important;
+  font-size: 0.83rem;
+  opacity: 0.84;
+}
+
+.debug-grid {
+  margin-top: 0.75rem;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.55rem;
+}
+
+.debug-grid div {
+  border-radius: 10px;
+  padding: 0.48rem 0.55rem;
+  background: rgba(255, 255, 255, 0.06);
+  display: grid;
+  gap: 0.22rem;
+}
+
+.debug-grid strong {
+  font-size: 0.72rem;
+  letter-spacing: 0.02em;
+  opacity: 0.8;
+}
+
+.debug-grid span {
+  font-size: 0.87rem;
+}
+
+.debug-wide {
+  grid-column: 1 / -1;
+}
+
+.debug-ellipsis {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 @keyframes pulseScan {
@@ -667,6 +730,10 @@ textarea {
   }
 
   .meta-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .debug-grid {
     grid-template-columns: 1fr;
   }
 }
