@@ -3,7 +3,9 @@ import { listActivePuzzles } from '../services/puzzleService';
 import { sortPlaybackSources } from '../utils/arUtils';
 
 const VIDEO_ASSET_ID = 'mindar-overlay-video';
-const DIRECT_SOURCE_TIMEOUT_MS = 4500;
+const DIRECT_SOURCE_TIMEOUT_MS = 9000;
+const TARGET_CACHE_PREFIX = 'mindar-target-cache-v1:';
+const MAX_TARGET_IMAGE_SIDE = 960;
 const LOCAL_FALLBACK_PUZZLE = {
   id: 'local-convex-lens',
   name: 'Convex Lens Puzzle',
@@ -13,6 +15,68 @@ const LOCAL_FALLBACK_PUZZLE = {
   isActive: true,
   playbackSources: [{ type: 'mp4', url: '/videos/convex-lens.mp4', priority: 10 }],
 };
+
+function toUint8Array(input) {
+  if (input instanceof Uint8Array) {
+    return input;
+  }
+
+  if (input instanceof ArrayBuffer) {
+    return new Uint8Array(input);
+  }
+
+  if (Array.isArray(input)) {
+    return Uint8Array.from(input);
+  }
+
+  throw new Error('Unsupported compiled target format');
+}
+
+function uint8ArrayToBase64(bytes) {
+  let binary = '';
+  const chunkSize = 0x8000;
+
+  for (let index = 0; index < bytes.length; index += chunkSize) {
+    const chunk = bytes.subarray(index, index + chunkSize);
+    binary += String.fromCharCode(...chunk);
+  }
+
+  return window.btoa(binary);
+}
+
+function base64ToUint8Array(base64) {
+  const binary = window.atob(base64);
+  const bytes = new Uint8Array(binary.length);
+
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+
+  return bytes;
+}
+
+function normalizeImageForCompilation(imageElement) {
+  const naturalWidth = imageElement.naturalWidth || imageElement.width;
+  const naturalHeight = imageElement.naturalHeight || imageElement.height;
+  const longestSide = Math.max(naturalWidth, naturalHeight);
+
+  if (!longestSide || longestSide <= MAX_TARGET_IMAGE_SIDE) {
+    return imageElement;
+  }
+
+  const scale = MAX_TARGET_IMAGE_SIDE / longestSide;
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(1, Math.round(naturalWidth * scale));
+  canvas.height = Math.max(1, Math.round(naturalHeight * scale));
+
+  const context = canvas.getContext('2d');
+  if (!context) {
+    return imageElement;
+  }
+
+  context.drawImage(imageElement, 0, 0, canvas.width, canvas.height);
+  return canvas;
+}
 
 function ARScanner() {
   const sceneRef = useRef(null);
@@ -80,16 +144,39 @@ function ARScanner() {
         throw new Error('MindAR compiler runtime not available.');
       }
 
+      const cacheKey = `${TARGET_CACHE_PREFIX}${imageUrl}`;
+      const cachedTargetBase64 = window.localStorage.getItem(cacheKey);
+
+      if (cachedTargetBase64) {
+        try {
+          const cachedBytes = base64ToUint8Array(cachedTargetBase64);
+          const cachedBlob = new Blob([cachedBytes], { type: 'application/octet-stream' });
+          setCompileProgress(100);
+          return URL.createObjectURL(cachedBlob);
+        } catch (error) {
+          window.localStorage.removeItem(cacheKey);
+        }
+      }
+
       const imageElement = await loadImageElement(imageUrl);
+      const compilationInput = normalizeImageForCompilation(imageElement);
       const compiler = new window.MINDAR.IMAGE.Compiler();
 
-      await compiler.compileImageTargets([imageElement], (progress) => {
+      await compiler.compileImageTargets([compilationInput], (progress) => {
         const normalizedProgress = Number(progress) <= 1 ? Number(progress) * 100 : Number(progress);
         setCompileProgress(Math.max(0, Math.min(100, Math.round(normalizedProgress))));
       });
 
       const compiled = compiler.exportData();
-      const blob = new Blob([compiled], { type: 'application/octet-stream' });
+      const compiledBytes = toUint8Array(compiled);
+      const blob = new Blob([compiledBytes], { type: 'application/octet-stream' });
+
+      try {
+        const base64 = uint8ArrayToBase64(compiledBytes);
+        window.localStorage.setItem(cacheKey, base64);
+      } catch (error) {
+        // Ignore cache write failures (quota/private mode) and proceed normally.
+      }
 
       return URL.createObjectURL(blob);
     },
@@ -124,8 +211,19 @@ function ARScanner() {
       let resolved = false;
       let timeoutId = null;
 
+      const tryPlay = () => {
+        if (resolved) {
+          return;
+        }
+
+        video.play().then(onSuccess).catch(onFailure);
+      };
+
       const clearHandlers = () => {
         video.oncanplay = null;
+        video.oncanplaythrough = null;
+        video.onloadeddata = null;
+        video.onloadedmetadata = null;
         video.onplaying = null;
         video.onerror = null;
         if (timeoutId) {
@@ -163,10 +261,13 @@ function ARScanner() {
       video.loop = true;
       video.muted = true;
       video.playsInline = true;
+      video.setAttribute('playsinline', 'true');
+      video.setAttribute('muted', 'true');
 
-      video.oncanplay = () => {
-        video.play().then(onSuccess).catch(onFailure);
-      };
+      video.onloadedmetadata = tryPlay;
+      video.onloadeddata = tryPlay;
+      video.oncanplay = tryPlay;
+      video.oncanplaythrough = tryPlay;
       video.onplaying = onSuccess;
       video.onerror = onFailure;
 
@@ -248,6 +349,41 @@ function ARScanner() {
 
     loadPuzzles();
   }, [runtimeReady, loadPuzzles]);
+
+  useEffect(() => {
+    if (!runtimeReady || !navigator?.mediaDevices?.getUserMedia) {
+      return;
+    }
+
+    let canceled = false;
+
+    const requestCameraAccess = async () => {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: 'environment' },
+          audio: false,
+        });
+
+        stream.getTracks().forEach((track) => track.stop());
+
+        if (!canceled) {
+          setStatusText((current) =>
+            current === 'Preparing scanner...' ? 'Loading puzzle...' : current
+          );
+        }
+      } catch (error) {
+        if (!canceled) {
+          setCameraError('Camera permission is required. Please allow camera and tap Rescan.');
+        }
+      }
+    };
+
+    requestCameraAccess();
+
+    return () => {
+      canceled = true;
+    };
+  }, [runtimeReady]);
 
   useEffect(() => {
     if (!runtimeReady || !selectedPuzzle?.puzzleImageUrl) {
@@ -422,6 +558,7 @@ function ARScanner() {
                 <a-camera position="0 0 0" look-controls="enabled: false" />
                 <a-entity ref={targetRef} mindar-image-target="targetIndex: 0">
                   <a-plane
+                    visible={videoState === 'playing'}
                     position="0 0 0"
                     width="1"
                     height="0.56"
