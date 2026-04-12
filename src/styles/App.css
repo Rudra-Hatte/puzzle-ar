@@ -426,16 +426,34 @@ textarea {
 
 .ar-video,
 .ar-youtube {
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
   object-fit: cover;
   border: 0;
   opacity: 0;
   transition: opacity 0.35s ease;
+  z-index: 2;
 }
 
 .ar-video.visible,
 .ar-youtube {
+  opacity: 1;
+}
+
+.ar-poster {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0;
+  transition: opacity 0.25s ease;
+  z-index: 1;
+}
+
+.ar-poster.visible {
   opacity: 1;
 }
 

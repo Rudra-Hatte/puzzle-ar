@@ -1,84 +1,63 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 
-const PROCESS_INTERVAL_MS = 180;
-const OPENCV_WAIT_TIMEOUT_MS = 9000;
+const SCRIPT_TIMEOUT_MS = 12000;
 const HLS_WAIT_TIMEOUT_MS = 5000;
-const MAX_CAMERA_SIDE = 540;
-const MAX_REFERENCE_SIDE = 460;
-const DEBUG_UI_INTERVAL_MS = 250;
-const OPENCV_SCRIPT_URLS = [
-  '/opencv/opencv.js',
-  'https://docs.opencv.org/4.9.0/opencv.js',
-  'https://docs.opencv.org/4.x/opencv.js',
-  'https://cdn.jsdelivr.net/npm/@techstark/opencv-js@4.9.0/dist/opencv.js',
-  'https://unpkg.com/@techstark/opencv-js@4.9.0/dist/opencv.js',
+const ENGINE_SLOW_FALLBACK_MS = 2200;
+const TARGET_CACHE_KEY = 'prototype-mindar-target-v1';
+
+const AFRAME_SCRIPT_URLS = [
+  'https://aframe.io/releases/1.5.0/aframe.min.js',
+  'https://aframe.io/releases/1.4.2/aframe.min.js',
 ];
+const MINDAR_AFRAME_SCRIPT_URLS = ['https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-aframe.prod.js'];
+const MINDAR_COMPILER_SCRIPT_URLS = ['https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-three.prod.js'];
 const HLS_SCRIPT_URLS = [
   'https://cdn.jsdelivr.net/npm/hls.js@1.5.17/dist/hls.min.js',
   'https://unpkg.com/hls.js@1.5.17/dist/hls.min.js',
 ];
-const MIN_GOOD_MATCHES = 16;
-const MIN_INLIERS = 12;
 
 const PROTOTYPE_PUZZLE = {
   id: 'prototype-convex-lens',
   name: 'Convex Lens Puzzle',
-  description: 'Single puzzle prototype mode',
   markerId: 'convex-lens-001',
   puzzleImageUrl: '/images/convex-lens.jpeg',
   posterImageUrl: '/images/ezgif-3c36c39b47974884-jpg/ezgif-frame-001.jpg',
+  mindTargetUrl: '/markers/convex-lens.mind',
   hlsUrl: '/videos/hls/convex-lens.m3u8',
   videoUrl: '/videos/convex-lens.mp4',
 };
 
 function createInitialDebugInfo() {
   return {
+    engine: 'idle',
+    targetSource: 'none',
     puzzleName: '-',
     sourceUrl: '-',
-    cvReady: false,
-    frameWidth: 0,
-    frameHeight: 0,
-    referenceFeatures: 0,
-    frameFeatures: 0,
-    goodMatches: 0,
-    inliers: 0,
-    homographyReady: false,
-    missStreak: 0,
+    sceneReady: false,
+    videoReady: false,
     detected: false,
     playbackMode: 'idle',
-    videoReady: false,
-    processMs: 0,
-    fpsEstimate: 0,
     note: 'Initializing...',
   };
 }
 
-function nowMs() {
-  if (typeof performance !== 'undefined' && typeof performance.now === 'function') {
-    return performance.now();
-  }
-
-  return Date.now();
-}
-
-function loadImage(url) {
+function loadScript(url, timeoutMs = SCRIPT_TIMEOUT_MS) {
   return new Promise((resolve, reject) => {
-    const image = new Image();
-    image.crossOrigin = 'anonymous';
-    image.onload = () => resolve(image);
-    image.onerror = () => reject(new Error('Unable to load reference puzzle image.'));
-    image.src = url;
-  });
-}
+    const absoluteUrl = new URL(url, window.location.origin).href;
+    const existingScript = Array.from(document.scripts).find((script) => script.src === absoluteUrl);
 
-function loadScript(url, timeoutMs) {
-  return new Promise((resolve, reject) => {
+    if (existingScript) {
+      resolve();
+      return;
+    }
+
     const script = document.createElement('script');
     script.async = true;
-    script.src = url;
+    script.src = absoluteUrl;
 
     const timeoutId = window.setTimeout(() => {
       cleanup();
+      script.remove();
       reject(new Error(`Script load timeout: ${url}`));
     }, timeoutMs);
 
@@ -103,235 +82,173 @@ function loadScript(url, timeoutMs) {
   });
 }
 
-async function ensureOpenCvScriptLoaded(timeoutMs = OPENCV_WAIT_TIMEOUT_MS) {
-  if (window.cv) {
-    return;
-  }
-
-  const existingScript = Array.from(document.scripts).find((script) =>
-    /opencv\.js/i.test(script.src || '')
-  );
-
-  if (existingScript) {
+async function ensureScriptLoaded(urls, testReady, timeoutMs, label) {
+  if (testReady()) {
     return;
   }
 
   let lastError = null;
-  for (const url of OPENCV_SCRIPT_URLS) {
+  for (const url of urls) {
     try {
       await loadScript(url, timeoutMs);
-      return;
+      if (testReady()) {
+        return;
+      }
     } catch (error) {
       lastError = error;
     }
   }
 
-  throw lastError || new Error('Unable to load OpenCV script.');
+  throw lastError || new Error(`${label} failed to load.`);
 }
 
 async function ensureHlsScriptLoaded(timeoutMs = HLS_WAIT_TIMEOUT_MS) {
-  if (window.Hls) {
-    return window.Hls;
-  }
-
-  const existingScript = Array.from(document.scripts).find((script) => /hls(\.min)?\.js/i.test(script.src || ''));
-  if (existingScript) {
-    return window.Hls || null;
-  }
-
-  let lastError = null;
-  for (const url of HLS_SCRIPT_URLS) {
-    try {
-      await loadScript(url, timeoutMs);
-      return window.Hls || null;
-    } catch (error) {
-      lastError = error;
-    }
-  }
-
-  if (lastError) {
-    throw lastError;
-  }
-
-  return null;
+  await ensureScriptLoaded(HLS_SCRIPT_URLS, () => Boolean(window.Hls), timeoutMs, 'HLS script');
+  return window.Hls;
 }
 
-function waitForCvObject(getCv, timeoutMs, timeoutMessage) {
-  return new Promise((resolve, reject) => {
-    let finished = false;
-    const timeoutId = window.setTimeout(() => {
-      if (finished) {
-        return;
-      }
-
-      finished = true;
-      reject(new Error(timeoutMessage));
-    }, timeoutMs);
-
-    const complete = (cv) => {
-      if (finished) {
-        return;
-      }
-
-      finished = true;
-      window.clearTimeout(timeoutId);
-      resolve(cv);
-    };
-
-    const checkRuntime = () => {
-      const cv = getCv();
-      if (!cv) {
-        return;
-      }
-
-      if (cv.Mat) {
-        complete(cv);
-        return;
-      }
-
-      cv.onRuntimeInitialized = () => complete(cv);
-    };
-
-    checkRuntime();
-
-    const pollId = window.setInterval(() => {
-      if (finished) {
-        window.clearInterval(pollId);
-        return;
-      }
-
-      checkRuntime();
-    }, 120);
-  });
-}
-
-function waitForOpenCvRuntime(timeoutMs = OPENCV_WAIT_TIMEOUT_MS) {
-  return ensureOpenCvScriptLoaded(timeoutMs).then(() =>
-    waitForCvObject(
-      () => window.cv,
-      timeoutMs,
-      'OpenCV runtime did not load. Disable Brave shields and retry.'
-    )
+async function ensureMindarAframeLoaded(timeoutMs = SCRIPT_TIMEOUT_MS) {
+  await ensureScriptLoaded(
+    AFRAME_SCRIPT_URLS,
+    () => Boolean(window.AFRAME),
+    timeoutMs,
+    'A-Frame script'
+  );
+  await ensureScriptLoaded(
+    MINDAR_AFRAME_SCRIPT_URLS,
+    () => Boolean(window.AFRAME && window.AFRAME.components && window.AFRAME.components['mindar-image']),
+    timeoutMs,
+    'MindAR A-Frame script'
   );
 }
 
-function computeScaledSize(width, height, maxSide) {
-  const longestSide = Math.max(width, height);
-  if (!longestSide || longestSide <= maxSide) {
-    return { width: Math.round(width), height: Math.round(height) };
+async function ensureMindarCompilerLoaded(timeoutMs = SCRIPT_TIMEOUT_MS) {
+  await ensureScriptLoaded(
+    MINDAR_COMPILER_SCRIPT_URLS,
+    () => Boolean(window.MINDAR && window.MINDAR.IMAGE && window.MINDAR.IMAGE.Compiler),
+    timeoutMs,
+    'MindAR compiler script'
+  );
+}
+
+async function urlExists(url) {
+  try {
+    const headResponse = await fetch(url, { method: 'HEAD', cache: 'no-store' });
+    if (headResponse.ok) {
+      return true;
+    }
+  } catch (error) {
+    // Continue with GET fallback.
   }
 
-  const scale = maxSide / longestSide;
-  return {
-    width: Math.max(1, Math.round(width * scale)),
-    height: Math.max(1, Math.round(height * scale)),
-  };
+  try {
+    const getResponse = await fetch(url, { method: 'GET', cache: 'no-store' });
+    return getResponse.ok;
+  } catch (error) {
+    return false;
+  }
+}
+
+function bufferToBase64(buffer) {
+  const bytes = new Uint8Array(buffer);
+  let binary = '';
+  const chunkSize = 0x8000;
+
+  for (let index = 0; index < bytes.length; index += chunkSize) {
+    const chunk = bytes.subarray(index, Math.min(index + chunkSize, bytes.length));
+    binary += String.fromCharCode(...chunk);
+  }
+
+  return window.btoa(binary);
+}
+
+function base64ToBuffer(base64String) {
+  const binary = window.atob(base64String);
+  const length = binary.length;
+  const bytes = new Uint8Array(length);
+
+  for (let index = 0; index < length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+
+  return bytes.buffer;
+}
+
+async function compileMindTargetFromImage(imageUrl) {
+  await ensureMindarCompilerLoaded();
+
+  if (!window.MINDAR || !window.MINDAR.IMAGE || !window.MINDAR.IMAGE.Compiler) {
+    throw new Error('MindAR compiler is unavailable.');
+  }
+
+  const imageResponse = await fetch(imageUrl, { cache: 'force-cache' });
+  if (!imageResponse.ok) {
+    throw new Error('Failed to load puzzle image for MindAR compilation.');
+  }
+
+  const blob = await imageResponse.blob();
+  const file = new File([blob], 'prototype-target.jpg', { type: blob.type || 'image/jpeg' });
+
+  const compiler = new window.MINDAR.IMAGE.Compiler();
+  await compiler.compileImageTargets([file]);
+  const targetBuffer = await compiler.exportData();
+
+  return targetBuffer;
 }
 
 function ARScanner() {
-  const cameraRef = useRef(null);
-  const overlayCanvasRef = useRef(null);
-  const processingCanvasRef = useRef(null);
+  const sceneRef = useRef(null);
+  const targetEntityRef = useRef(null);
+  const targetPlaneRef = useRef(null);
   const sourceVideoRef = useRef(null);
-  const sourceFrameCanvasRef = useRef(null);
   const manualVideoRef = useRef(null);
-  const posterImageRef = useRef(null);
   const hlsControllerRef = useRef(null);
-  const videoBufferedRef = useRef(false);
-
-  const animationRef = useRef(0);
-  const lastProcessAtRef = useRef(0);
-  const lastFrameAtRef = useRef(0);
-  const streamRef = useRef(null);
-  const cvResourcesRef = useRef(null);
+  const fallbackTimerRef = useRef(0);
+  const dynamicTargetUrlRef = useRef('');
+  const manualDemoModeRef = useRef(false);
   const statusRef = useRef('Tap Start Scanner to begin.');
   const debugInfoRef = useRef(createInitialDebugInfo());
-  const lastDebugUpdateAtRef = useRef(0);
 
   const [statusText, setStatusText] = useState('Tap Start Scanner to begin.');
   const [cameraError, setCameraError] = useState('');
   const [loading, setLoading] = useState(false);
-  const [puzzleDetected, setPuzzleDetected] = useState(false);
   const [scannerStarted, setScannerStarted] = useState(false);
+  const [sceneReady, setSceneReady] = useState(false);
+  const [targetSrc, setTargetSrc] = useState('');
+  const [targetSource, setTargetSource] = useState('none');
+  const [sourceVideoReady, setSourceVideoReady] = useState(false);
+  const [puzzleDetected, setPuzzleDetected] = useState(false);
   const [manualDemoMode, setManualDemoMode] = useState(false);
+  const [manualVideoReady, setManualVideoReady] = useState(false);
   const [initNonce, setInitNonce] = useState(0);
   const [debugVisible, setDebugVisible] = useState(false);
   const [debugInfo, setDebugInfo] = useState(createInitialDebugInfo);
 
+  const setStatus = useCallback((text) => {
+    if (statusRef.current === text) {
+      return;
+    }
+
+    statusRef.current = text;
+    setStatusText(text);
+  }, []);
+
   const updateDebug = useCallback((partial, force = false) => {
-    const nextInfo = { ...debugInfoRef.current, ...partial };
-    debugInfoRef.current = nextInfo;
-
-    const currentTime = nowMs();
-    if (force || currentTime - lastDebugUpdateAtRef.current >= DEBUG_UI_INTERVAL_MS) {
-      lastDebugUpdateAtRef.current = currentTime;
-      setDebugInfo(nextInfo);
-    }
-  }, []);
-
-  const resetDebug = useCallback((partial = {}) => {
-    const nextInfo = { ...createInitialDebugInfo(), ...partial };
-    debugInfoRef.current = nextInfo;
-    lastDebugUpdateAtRef.current = 0;
-    lastFrameAtRef.current = 0;
-    setDebugInfo(nextInfo);
-  }, []);
-
-  const setStatus = useCallback((nextText) => {
-    if (statusRef.current !== nextText) {
-      statusRef.current = nextText;
-      setStatusText(nextText);
-    }
-  }, []);
-
-  const clearOverlay = useCallback(() => {
-    const canvas = overlayCanvasRef.current;
-    if (!canvas) {
+    const next = { ...debugInfoRef.current, ...partial };
+    debugInfoRef.current = next;
+    if (force) {
+      setDebugInfo(next);
       return;
     }
 
-    const context = canvas.getContext('2d');
-    if (!context) {
-      return;
-    }
-
-    context.clearRect(0, 0, canvas.width, canvas.height);
+    setDebugInfo(next);
   }, []);
 
-  const stopLoop = useCallback(() => {
-    if (animationRef.current) {
-      window.cancelAnimationFrame(animationRef.current);
-      animationRef.current = 0;
+  const clearFallbackTimer = useCallback(() => {
+    if (fallbackTimerRef.current) {
+      window.clearTimeout(fallbackTimerRef.current);
+      fallbackTimerRef.current = 0;
     }
-  }, []);
-
-  const stopStream = useCallback(() => {
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((track) => track.stop());
-      streamRef.current = null;
-    }
-
-    if (cameraRef.current) {
-      cameraRef.current.pause();
-      cameraRef.current.srcObject = null;
-    }
-  }, []);
-
-  const disposeCvResources = useCallback(() => {
-    const resources = cvResourcesRef.current;
-    if (!resources) {
-      return;
-    }
-
-    const { refGray, refKeypoints, refDescriptors, orb, matcher, emptyMask } = resources;
-    if (refGray) refGray.delete();
-    if (refKeypoints) refKeypoints.delete();
-    if (refDescriptors) refDescriptors.delete();
-    if (orb) orb.delete();
-    if (matcher) matcher.delete();
-    if (emptyMask) emptyMask.delete();
-
-    cvResourcesRef.current = null;
   }, []);
 
   const clearHlsController = useCallback(() => {
@@ -341,14 +258,65 @@ function ARScanner() {
     }
   }, []);
 
+  const revokeDynamicTargetUrl = useCallback(() => {
+    if (dynamicTargetUrlRef.current) {
+      URL.revokeObjectURL(dynamicTargetUrlRef.current);
+      dynamicTargetUrlRef.current = '';
+    }
+  }, []);
+
+  const setMindarPlaneSource = useCallback((mode) => {
+    const plane = targetPlaneRef.current;
+    if (!plane) {
+      return;
+    }
+
+    if (mode === 'video') {
+      plane.setAttribute(
+        'material',
+        'shader: flat; src: #mindar-video-source; transparent: true; opacity: 1;'
+      );
+      return;
+    }
+
+    plane.setAttribute(
+      'material',
+      'shader: flat; src: #mindar-poster-source; transparent: true; opacity: 1;'
+    );
+  }, []);
+
+  const activateManualFallback = useCallback(
+    (noteText) => {
+      clearFallbackTimer();
+      setLoading(false);
+      setManualVideoReady(false);
+      setManualDemoMode(true);
+      setPuzzleDetected(true);
+      setStatus('Poster shown instantly. Video buffering...');
+      updateDebug(
+        {
+          engine: 'manual',
+          detected: true,
+          playbackMode: 'poster',
+          videoReady: false,
+          note:
+            noteText ||
+            'MindAR is taking too long. Manual poster/video fallback is active for prototype demo.',
+        },
+        true
+      );
+    },
+    [clearFallbackTimer, setStatus, updateDebug]
+  );
+
   const configureSourceVideo = useCallback(async () => {
     const sourceVideo = sourceVideoRef.current;
     if (!sourceVideo) {
-      throw new Error('Video layer is unavailable.');
+      return;
     }
 
     clearHlsController();
-    videoBufferedRef.current = false;
+    setSourceVideoReady(false);
 
     sourceVideo.pause();
     sourceVideo.removeAttribute('src');
@@ -359,14 +327,19 @@ function ARScanner() {
     sourceVideo.preload = 'auto';
     sourceVideo.crossOrigin = 'anonymous';
 
-    sourceVideo.oncanplay = () => {
-      videoBufferedRef.current = true;
-      updateDebug({ videoReady: true, note: 'Video buffered. Ready to swap from poster.' }, true);
+    const onVideoReady = () => {
+      setSourceVideoReady(true);
+      updateDebug(
+        {
+          videoReady: true,
+          note: 'Video source is buffered and ready.',
+        },
+        true
+      );
     };
-    sourceVideo.oncanplaythrough = () => {
-      videoBufferedRef.current = true;
-      updateDebug({ videoReady: true, note: 'Video fully ready. Seamless playback enabled.' }, true);
-    };
+
+    sourceVideo.oncanplay = onVideoReady;
+    sourceVideo.oncanplaythrough = onVideoReady;
 
     let selectedSource = PROTOTYPE_PUZZLE.videoUrl;
     let playbackMode = 'mp4';
@@ -387,19 +360,14 @@ function ARScanner() {
             const hls = new Hls({
               enableWorker: true,
               lowLatencyMode: true,
-              backBufferLength: 12,
             });
 
             hlsControllerRef.current = hls;
             hls.attachMedia(sourceVideo);
             hls.loadSource(PROTOTYPE_PUZZLE.hlsUrl);
 
-            hls.on(Hls.Events.MANIFEST_PARSED, () => {
-              updateDebug({ note: 'HLS manifest ready. Waiting for first segment...' }, true);
-            });
-
             hls.on(Hls.Events.ERROR, (_event, data) => {
-              if (!data?.fatal) {
+              if (!data || !data.fatal) {
                 return;
               }
 
@@ -410,18 +378,18 @@ function ARScanner() {
                 {
                   sourceUrl: PROTOTYPE_PUZZLE.videoUrl,
                   playbackMode: 'mp4',
-                  note: 'HLS error. Falling back to MP4.',
+                  note: 'HLS error. Falling back to MP4 source.',
                 },
                 true
               );
             });
 
-            playbackMode = 'hls-js';
             selectedSource = PROTOTYPE_PUZZLE.hlsUrl;
+            playbackMode = 'hls-js';
           }
-        } catch (_error) {
-          playbackMode = 'mp4';
+        } catch (error) {
           selectedSource = PROTOTYPE_PUZZLE.videoUrl;
+          playbackMode = 'mp4';
         }
       }
     }
@@ -443,422 +411,56 @@ function ARScanner() {
     );
   }, [clearHlsController, updateDebug]);
 
-  const prepareReference = useCallback(async (cv, imageUrl) => {
-    const referenceImage = await loadImage(imageUrl);
-    const referenceSize = computeScaledSize(
-      referenceImage.naturalWidth || referenceImage.width,
-      referenceImage.naturalHeight || referenceImage.height,
-      MAX_REFERENCE_SIDE
-    );
+  const resolveTargetSource = useCallback(async () => {
+    updateDebug({ note: 'Looking for prebuilt MindAR target...', targetSource: 'checking' }, true);
 
-    const referenceCanvas = document.createElement('canvas');
-    referenceCanvas.width = referenceSize.width;
-    referenceCanvas.height = referenceSize.height;
-    const referenceContext = referenceCanvas.getContext('2d');
-    referenceContext.drawImage(referenceImage, 0, 0, referenceCanvas.width, referenceCanvas.height);
-
-    const refRgba = cv.imread(referenceCanvas);
-    const refGray = new cv.Mat();
-    cv.cvtColor(refRgba, refGray, cv.COLOR_RGBA2GRAY);
-
-    const orb = new cv.ORB(650);
-    const refKeypoints = new cv.KeyPointVector();
-    const refDescriptors = new cv.Mat();
-    const emptyMask = new cv.Mat();
-
-    orb.detectAndCompute(refGray, emptyMask, refKeypoints, refDescriptors);
-
-    refRgba.delete();
-
-    if (refDescriptors.empty() || refKeypoints.size() < 20) {
-      refGray.delete();
-      refKeypoints.delete();
-      refDescriptors.delete();
-      orb.delete();
-      emptyMask.delete();
-      throw new Error('Reference image has too few detectable features.');
+    if (await urlExists(PROTOTYPE_PUZZLE.mindTargetUrl)) {
+      return {
+        url: PROTOTYPE_PUZZLE.mindTargetUrl,
+        source: 'static',
+      };
     }
 
-    const matcher = new cv.BFMatcher(cv.NORM_HAMMING, false);
+    updateDebug({ note: 'No prebuilt target found. Checking local cache...', targetSource: 'cache' }, true);
 
-    const processingCanvas = processingCanvasRef.current;
+    const cachedBase64 = window.localStorage.getItem(TARGET_CACHE_KEY);
+    if (cachedBase64) {
+      try {
+        const buffer = base64ToBuffer(cachedBase64);
+        const blob = new Blob([buffer], { type: 'application/octet-stream' });
+        const url = URL.createObjectURL(blob);
+        dynamicTargetUrlRef.current = url;
+        return {
+          url,
+          source: 'cached-compiled',
+        };
+      } catch (error) {
+        window.localStorage.removeItem(TARGET_CACHE_KEY);
+      }
+    }
 
-    cvResourcesRef.current = {
-      cv,
-      orb,
-      matcher,
-      emptyMask,
-      refGray,
-      refKeypoints,
-      refDescriptors,
-      refWidth: referenceCanvas.width,
-      refHeight: referenceCanvas.height,
-      frameWidth: processingCanvas?.width || 0,
-      frameHeight: processingCanvas?.height || 0,
-      missStreak: 0,
+    updateDebug({ note: 'Compiling target from puzzle image (first run only)...', targetSource: 'compile' }, true);
+
+    const compiledBuffer = await compileMindTargetFromImage(PROTOTYPE_PUZZLE.puzzleImageUrl);
+    try {
+      window.localStorage.setItem(TARGET_CACHE_KEY, bufferToBase64(compiledBuffer));
+    } catch (error) {
+      // Ignore storage quota errors and continue using in-memory blob.
+    }
+
+    const blob = new Blob([compiledBuffer], { type: 'application/octet-stream' });
+    const url = URL.createObjectURL(blob);
+    dynamicTargetUrlRef.current = url;
+
+    return {
+      url,
+      source: 'compiled',
     };
-
-    updateDebug(
-      {
-        referenceFeatures: refKeypoints.size(),
-        note: 'Reference features extracted.',
-      },
-      true
-    );
   }, [updateDebug]);
 
-  const startCamera = useCallback(async () => {
-    const camera = cameraRef.current;
-    if (!camera) {
-      throw new Error('Camera preview element is unavailable.');
-    }
-
-    let stream;
-    try {
-      stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          facingMode: { ideal: 'environment' },
-        },
-        audio: false,
-      });
-    } catch (error) {
-      stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
-    }
-
-    streamRef.current = stream;
-    camera.srcObject = stream;
-    camera.setAttribute('playsinline', 'true');
-    camera.muted = true;
-
-    await camera.play().catch(() => {});
-
-    if (camera.readyState < 2) {
-      await new Promise((resolve, reject) => {
-        const timeoutId = window.setTimeout(() => {
-          cleanup();
-          reject(new Error('Camera did not become ready. Please retry.'));
-        }, 4500);
-
-        const onReady = () => {
-          cleanup();
-          resolve();
-        };
-
-        const cleanup = () => {
-          window.clearTimeout(timeoutId);
-          camera.removeEventListener('loadeddata', onReady);
-          camera.removeEventListener('canplay', onReady);
-        };
-
-        camera.addEventListener('loadeddata', onReady, { once: true });
-        camera.addEventListener('canplay', onReady, { once: true });
-      });
-    }
-
-    const frameSize = computeScaledSize(camera.videoWidth || 1280, camera.videoHeight || 720, MAX_CAMERA_SIDE);
-    const processingCanvas = processingCanvasRef.current;
-    const overlayCanvas = overlayCanvasRef.current;
-
-    if (!processingCanvas || !overlayCanvas) {
-      throw new Error('Canvas layers are unavailable.');
-    }
-
-    processingCanvas.width = frameSize.width;
-    processingCanvas.height = frameSize.height;
-    overlayCanvas.width = frameSize.width;
-    overlayCanvas.height = frameSize.height;
-
-    if (cvResourcesRef.current) {
-      cvResourcesRef.current.frameWidth = frameSize.width;
-      cvResourcesRef.current.frameHeight = frameSize.height;
-    }
-
-    updateDebug(
-      {
-        frameWidth: frameSize.width,
-        frameHeight: frameSize.height,
-        note: 'Camera ready. Searching for puzzle...',
-      },
-      true
-    );
-  }, [updateDebug]);
-
-  const renderWarpedVideo = useCallback((homography) => {
-    const resources = cvResourcesRef.current;
-    const sourceVideo = sourceVideoRef.current;
-    const sourceFrameCanvas = sourceFrameCanvasRef.current;
-    const overlayCanvas = overlayCanvasRef.current;
-
-    if (!resources || !sourceVideo || !sourceFrameCanvas || !overlayCanvas) {
-      return false;
-    }
-
-    const isVideoReady = videoBufferedRef.current || sourceVideo.readyState >= 2;
-    if (!isVideoReady) {
-      return false;
-    }
-
-    sourceVideo.muted = true;
-    sourceVideo.loop = true;
-    sourceVideo.playsInline = true;
-    sourceVideo.setAttribute('playsinline', 'true');
-    if (sourceVideo.paused) {
-      sourceVideo.play().catch(() => {});
-    }
-
-    sourceFrameCanvas.width = resources.refWidth;
-    sourceFrameCanvas.height = resources.refHeight;
-    const sourceContext = sourceFrameCanvas.getContext('2d');
-    sourceContext.drawImage(sourceVideo, 0, 0, sourceFrameCanvas.width, sourceFrameCanvas.height);
-
-    const { cv } = resources;
-    const sourceMat = cv.imread(sourceFrameCanvas);
-    const warped = new cv.Mat.zeros(resources.frameHeight, resources.frameWidth, cv.CV_8UC4);
-
-    cv.warpPerspective(
-      sourceMat,
-      warped,
-      homography,
-      new cv.Size(resources.frameWidth, resources.frameHeight),
-      cv.INTER_LINEAR,
-      cv.BORDER_CONSTANT,
-      new cv.Scalar(0, 0, 0, 0)
-    );
-
-    cv.imshow(overlayCanvas, warped);
-
-    sourceMat.delete();
-    warped.delete();
-    return true;
-  }, []);
-
-  const renderWarpedPoster = useCallback((homography) => {
-    const resources = cvResourcesRef.current;
-    const sourceFrameCanvas = sourceFrameCanvasRef.current;
-    const overlayCanvas = overlayCanvasRef.current;
-    const posterImage = posterImageRef.current;
-
-    if (!resources || !sourceFrameCanvas || !overlayCanvas || !posterImage) {
-      return false;
-    }
-
-    sourceFrameCanvas.width = resources.refWidth;
-    sourceFrameCanvas.height = resources.refHeight;
-    const sourceContext = sourceFrameCanvas.getContext('2d');
-    sourceContext.drawImage(posterImage, 0, 0, sourceFrameCanvas.width, sourceFrameCanvas.height);
-
-    const { cv } = resources;
-    const sourceMat = cv.imread(sourceFrameCanvas);
-    const warped = new cv.Mat.zeros(resources.frameHeight, resources.frameWidth, cv.CV_8UC4);
-
-    cv.warpPerspective(
-      sourceMat,
-      warped,
-      homography,
-      new cv.Size(resources.frameWidth, resources.frameHeight),
-      cv.INTER_LINEAR,
-      cv.BORDER_CONSTANT,
-      new cv.Scalar(0, 0, 0, 0)
-    );
-
-    cv.imshow(overlayCanvas, warped);
-
-    sourceMat.delete();
-    warped.delete();
-    return true;
-  }, []);
-
-  const processFrame = useCallback(() => {
-    if (manualDemoMode) {
-      return;
-    }
-
-    const resources = cvResourcesRef.current;
-    const camera = cameraRef.current;
-    const processingCanvas = processingCanvasRef.current;
-    if (!resources || !camera || !processingCanvas || camera.readyState < 2) {
-      return;
-    }
-
-    const processingContext = processingCanvas.getContext('2d', { willReadFrequently: true });
-    processingContext.drawImage(camera, 0, 0, processingCanvas.width, processingCanvas.height);
-
-    const { cv, orb, matcher, refKeypoints, refDescriptors, emptyMask } = resources;
-    const frameStart = nowMs();
-    const frameGap = lastFrameAtRef.current ? frameStart - lastFrameAtRef.current : 0;
-    lastFrameAtRef.current = frameStart;
-
-    let frameFeatureCount = 0;
-    let goodMatchCount = 0;
-    let inlierCount = 0;
-    let homographyReady = false;
-    let detected = false;
-    let detectionMode = 'none';
-
-    let frameRgba = null;
-    let frameGray = null;
-    let frameKeypoints = null;
-    let frameDescriptors = null;
-    let matches = null;
-    let srcPoints = null;
-    let dstPoints = null;
-    let inlierMask = null;
-    let homography = null;
-
-    try {
-      frameRgba = cv.imread(processingCanvas);
-      frameGray = new cv.Mat();
-      cv.cvtColor(frameRgba, frameGray, cv.COLOR_RGBA2GRAY);
-
-      frameKeypoints = new cv.KeyPointVector();
-      frameDescriptors = new cv.Mat();
-      orb.detectAndCompute(frameGray, emptyMask, frameKeypoints, frameDescriptors);
-      frameFeatureCount = frameKeypoints.size();
-
-      if (!frameDescriptors.empty()) {
-        matches = new cv.DMatchVectorVector();
-        matcher.knnMatch(refDescriptors, frameDescriptors, matches, 2);
-
-        const srcBuffer = [];
-        const dstBuffer = [];
-
-        for (let index = 0; index < matches.size(); index += 1) {
-          const pair = matches.get(index);
-          if (pair.size() < 2) {
-            continue;
-          }
-
-          const first = pair.get(0);
-          const second = pair.get(1);
-
-          if (first.distance < 0.75 * second.distance) {
-            const srcPoint = refKeypoints.get(first.queryIdx).pt;
-            const dstPoint = frameKeypoints.get(first.trainIdx).pt;
-
-            srcBuffer.push(srcPoint.x, srcPoint.y);
-            dstBuffer.push(dstPoint.x, dstPoint.y);
-          }
-        }
-
-        const pointCount = srcBuffer.length / 2;
-        goodMatchCount = pointCount;
-        if (pointCount >= MIN_GOOD_MATCHES) {
-          srcPoints = cv.matFromArray(pointCount, 1, cv.CV_32FC2, srcBuffer);
-          dstPoints = cv.matFromArray(pointCount, 1, cv.CV_32FC2, dstBuffer);
-          inlierMask = new cv.Mat();
-          homography = cv.findHomography(srcPoints, dstPoints, cv.RANSAC, 5, inlierMask);
-          homographyReady = !homography.empty();
-
-          if (!homography.empty()) {
-            inlierCount = cv.countNonZero(inlierMask);
-          }
-
-          if (homographyReady && inlierCount >= MIN_INLIERS) {
-            if (renderWarpedVideo(homography)) {
-              detected = true;
-              detectionMode = 'video';
-            } else if (renderWarpedPoster(homography)) {
-              detected = true;
-              detectionMode = 'poster';
-            }
-          }
-        }
-      }
-
-      if (detected) {
-        resources.missStreak = 0;
-        if (!puzzleDetected) {
-          setPuzzleDetected(true);
-        }
-
-        if (detectionMode === 'video') {
-          setStatus('Puzzle detected. Video is playing.');
-        } else {
-          setStatus('Puzzle detected. Showing poster while video buffers...');
-        }
-      } else {
-        resources.missStreak += 1;
-        if (resources.missStreak > 2) {
-          clearOverlay();
-          if (puzzleDetected) {
-            setPuzzleDetected(false);
-            setStatus('Point camera at the puzzle image.');
-          }
-        }
-      }
-
-      const processMs = nowMs() - frameStart;
-      updateDebug(
-        {
-          frameFeatures: frameFeatureCount,
-          goodMatches: goodMatchCount,
-          inliers: inlierCount,
-          missStreak: resources.missStreak,
-          detected,
-          playbackMode: detectionMode === 'none' ? debugInfoRef.current.playbackMode : detectionMode,
-          videoReady: videoBufferedRef.current,
-          processMs: Number(processMs.toFixed(1)),
-          fpsEstimate: frameGap > 0 ? Math.round(1000 / Math.max(1, frameGap)) : 0,
-          note: detected
-            ? detectionMode === 'video'
-              ? 'Locked on puzzle. Video playing.'
-              : 'Locked on puzzle. Poster shown while video buffers.'
-            : goodMatchCount >= MIN_GOOD_MATCHES
-              ? 'Matching features found. Adjust angle/lighting for lock.'
-              : 'Searching for puzzle features...',
-          cvReady: true,
-          frameWidth: resources.frameWidth,
-          frameHeight: resources.frameHeight,
-          homographyReady,
-        },
-        false
-      );
-    } catch (error) {
-      // Ignore per-frame processing errors and continue scanning.
-      updateDebug(
-        {
-          note: 'Frame processing hiccup. Continuing scan...',
-          detected: false,
-          playbackMode: 'error',
-        },
-        false
-      );
-    } finally {
-      if (frameRgba) frameRgba.delete();
-      if (frameGray) frameGray.delete();
-      if (frameKeypoints) frameKeypoints.delete();
-      if (frameDescriptors) frameDescriptors.delete();
-      if (matches) matches.delete();
-      if (srcPoints) srcPoints.delete();
-      if (dstPoints) dstPoints.delete();
-      if (inlierMask) inlierMask.delete();
-      if (homography) homography.delete();
-    }
-  }, [
-    clearOverlay,
-    manualDemoMode,
-    puzzleDetected,
-    renderWarpedPoster,
-    renderWarpedVideo,
-    setStatus,
-    updateDebug,
-  ]);
-
-  const startLoop = useCallback(() => {
-    stopLoop();
-    lastProcessAtRef.current = 0;
-
-    const tick = (timestamp) => {
-      if (timestamp - lastProcessAtRef.current >= PROCESS_INTERVAL_MS) {
-        lastProcessAtRef.current = timestamp;
-        processFrame();
-      }
-
-      animationRef.current = window.requestAnimationFrame(tick);
-    };
-
-    animationRef.current = window.requestAnimationFrame(tick);
-  }, [processFrame, stopLoop]);
+  useEffect(() => {
+    manualDemoModeRef.current = manualDemoMode;
+  }, [manualDemoMode]);
 
   useEffect(() => {
     if (!scannerStarted) {
@@ -866,130 +468,279 @@ function ARScanner() {
     }
 
     let canceled = false;
-    const mountedSourceVideo = sourceVideoRef.current;
+    const sourceVideoAtMount = sourceVideoRef.current;
 
-    const initScanner = async () => {
+    const startMindar = async () => {
       try {
         setLoading(true);
         setCameraError('');
+        setSceneReady(false);
+        setTargetSrc('');
+        setTargetSource('none');
+        setSourceVideoReady(false);
         setPuzzleDetected(false);
         setManualDemoMode(false);
-        resetDebug({ note: 'Starting camera...' });
-        clearOverlay();
-        setStatus('Starting camera...');
-
+        setManualVideoReady(false);
         updateDebug(
           {
+            engine: 'loading',
+            targetSource: 'none',
             puzzleName: PROTOTYPE_PUZZLE.name,
             sourceUrl: PROTOTYPE_PUZZLE.hlsUrl || PROTOTYPE_PUZZLE.videoUrl,
+            sceneReady: false,
+            videoReady: false,
+            detected: false,
+            playbackMode: 'idle',
+            note: 'Starting scanner...',
           },
           true
         );
-
-        await startCamera();
-        if (canceled) return;
-
-        setLoading(false);
-        setStatus('Camera ready. Loading scanner engine...');
-        updateDebug({ note: 'Camera ready. Loading OpenCV...' }, true);
-
         setStatus('Loading scanner engine...');
-        const cv = await waitForOpenCvRuntime();
-        if (canceled) return;
 
-        updateDebug({ cvReady: true, note: 'OpenCV ready. Building reference features...' }, true);
+        clearFallbackTimer();
+        fallbackTimerRef.current = window.setTimeout(() => {
+          if (canceled || manualDemoModeRef.current) {
+            return;
+          }
 
-        setStatus('Preparing puzzle reference...');
-        disposeCvResources();
-        await prepareReference(cv, PROTOTYPE_PUZZLE.puzzleImageUrl);
-        if (canceled) return;
-
-        setStatus('Preparing poster frame...');
-        posterImageRef.current = await loadImage(PROTOTYPE_PUZZLE.posterImageUrl || PROTOTYPE_PUZZLE.puzzleImageUrl);
-        updateDebug({ note: 'Poster frame ready. Buffering video source...' }, true);
+          activateManualFallback('MindAR engine is still loading. Showing instant poster fallback.');
+        }, ENGINE_SLOW_FALLBACK_MS);
 
         await configureSourceVideo();
         if (canceled) return;
 
+        await ensureMindarAframeLoaded();
+        if (canceled) return;
+
+        const targetResult = await resolveTargetSource();
+        if (canceled) return;
+
+        setTargetSource(targetResult.source);
+        setTargetSrc(targetResult.url);
+        setLoading(false);
         setStatus('Point camera at the puzzle image.');
-        updateDebug({ note: 'Tracker ready. Point camera at the puzzle image.' }, true);
-        startLoop();
+        updateDebug(
+          {
+            engine: 'mindar',
+            targetSource: targetResult.source,
+            note: 'MindAR target is ready.',
+          },
+          true
+        );
       } catch (error) {
-        if (!canceled) {
-          setLoading(false);
-          setCameraError(error.message || 'Failed to initialize scanner.');
-          setStatus('Scanner initialization failed.');
-          updateDebug({ note: error.message || 'Scanner initialization failed.' }, true);
+        if (canceled) {
+          return;
         }
+
+        if (manualDemoModeRef.current) {
+          setLoading(false);
+          setCameraError('');
+          setStatus('Demo mode active. MindAR is still initializing in background.');
+          updateDebug(
+            {
+              note: 'MindAR initialization failed, but demo fallback stays active.',
+            },
+            true
+          );
+          return;
+        }
+
+        activateManualFallback('MindAR initialization failed. Demo fallback activated.');
+      } finally {
+        clearFallbackTimer();
       }
     };
 
-    initScanner();
+    startMindar();
 
     return () => {
       canceled = true;
-      stopLoop();
-      stopStream();
-      clearOverlay();
-      disposeCvResources();
+      clearFallbackTimer();
       clearHlsController();
-      posterImageRef.current = null;
-      videoBufferedRef.current = false;
 
-      if (mountedSourceVideo) {
-        mountedSourceVideo.pause();
-        mountedSourceVideo.oncanplay = null;
-        mountedSourceVideo.oncanplaythrough = null;
-        mountedSourceVideo.removeAttribute('src');
-        mountedSourceVideo.load();
+      const sourceVideo = sourceVideoAtMount;
+      if (sourceVideo) {
+        sourceVideo.pause();
+        sourceVideo.oncanplay = null;
+        sourceVideo.oncanplaythrough = null;
+        sourceVideo.removeAttribute('src');
+        sourceVideo.load();
       }
+
+      revokeDynamicTargetUrl();
     };
   }, [
     scannerStarted,
     initNonce,
-    clearOverlay,
+    activateManualFallback,
+    clearFallbackTimer,
     clearHlsController,
     configureSourceVideo,
-    disposeCvResources,
-    prepareReference,
-    resetDebug,
+    resolveTargetSource,
+    revokeDynamicTargetUrl,
     setStatus,
-    startCamera,
-    startLoop,
-    stopLoop,
-    stopStream,
     updateDebug,
   ]);
 
-  const onStartScanner = useCallback(() => {
-    setCameraError('');
-    setManualDemoMode(false);
-    setScannerStarted(true);
-    setInitNonce((current) => current + 1);
-    setStatus('Starting camera...');
-    updateDebug({ note: 'Starting scanner...' }, true);
-  }, [setStatus, updateDebug]);
+  useEffect(() => {
+    if (!targetSrc) {
+      return undefined;
+    }
 
-  const onManualPlay = useCallback(() => {
-    if (!scannerStarted || loading) {
+    const scene = sceneRef.current;
+    if (!scene) {
+      return undefined;
+    }
+
+    const onArReady = () => {
+      setSceneReady(true);
+      setLoading(false);
+      updateDebug(
+        {
+          sceneReady: true,
+          note: 'MindAR camera session is ready.',
+        },
+        true
+      );
+    };
+
+    const onArError = () => {
+      activateManualFallback('MindAR camera failed. Manual demo mode is active.');
+    };
+
+    scene.addEventListener('arReady', onArReady);
+    scene.addEventListener('arError', onArError);
+
+    return () => {
+      scene.removeEventListener('arReady', onArReady);
+      scene.removeEventListener('arError', onArError);
+    };
+  }, [targetSrc, activateManualFallback, updateDebug]);
+
+  useEffect(() => {
+    if (!targetSrc || manualDemoMode) {
+      return undefined;
+    }
+
+    const targetEntity = targetEntityRef.current;
+    if (!targetEntity) {
+      return undefined;
+    }
+
+    const onTargetFound = () => {
+      setPuzzleDetected(true);
+      if (sourceVideoReady) {
+        setMindarPlaneSource('video');
+        setStatus('Puzzle detected. Video is playing.');
+        updateDebug({ detected: true, playbackMode: 'video', note: 'Target found. Video texture active.' }, true);
+
+        const sourceVideo = sourceVideoRef.current;
+        if (sourceVideo) {
+          sourceVideo.play().catch(() => {});
+        }
+      } else {
+        setMindarPlaneSource('poster');
+        setStatus('Puzzle detected. Poster shown while video buffers...');
+        updateDebug({ detected: true, playbackMode: 'poster', note: 'Target found. Poster shown immediately.' }, true);
+      }
+    };
+
+    const onTargetLost = () => {
+      setPuzzleDetected(false);
+      setMindarPlaneSource('poster');
+      setStatus('Point camera at the puzzle image.');
+      updateDebug({ detected: false, note: 'Target lost. Waiting for puzzle.' }, true);
+    };
+
+    targetEntity.addEventListener('targetFound', onTargetFound);
+    targetEntity.addEventListener('targetLost', onTargetLost);
+
+    return () => {
+      targetEntity.removeEventListener('targetFound', onTargetFound);
+      targetEntity.removeEventListener('targetLost', onTargetLost);
+    };
+  }, [manualDemoMode, sourceVideoReady, targetSrc, setMindarPlaneSource, setStatus, updateDebug]);
+
+  useEffect(() => {
+    if (!puzzleDetected || !sourceVideoReady || manualDemoMode) {
       return;
     }
 
-    stopLoop();
-    clearOverlay();
-    setManualDemoMode(true);
-    setPuzzleDetected(true);
-    setStatus('Manual demo mode playing video.');
-    updateDebug(
-      {
-        detected: true,
-        playbackMode: 'manual',
-        videoReady: true,
-        note: 'Manual demo fallback enabled. Auto tracking paused.',
-      },
-      true
+    setMindarPlaneSource('video');
+    setStatus('Puzzle detected. Video is playing.');
+    updateDebug({ playbackMode: 'video', note: 'Video buffered. Swapped from poster to video.' }, true);
+
+    const sourceVideo = sourceVideoRef.current;
+    if (sourceVideo) {
+      sourceVideo.play().catch(() => {});
+    }
+  }, [manualDemoMode, puzzleDetected, setMindarPlaneSource, setStatus, sourceVideoReady, updateDebug]);
+
+  useEffect(() => {
+    if (!manualDemoMode) {
+      return undefined;
+    }
+
+    const manualVideo = manualVideoRef.current;
+    if (!manualVideo) {
+      return undefined;
+    }
+
+    let readyHandled = false;
+
+    const markManualVideoReady = () => {
+      if (readyHandled) {
+        return;
+      }
+
+      readyHandled = true;
+      setManualVideoReady(true);
+      setStatus('Demo video is playing.');
+      updateDebug({ videoReady: true, playbackMode: 'manual-video', note: 'Poster swapped to demo video.' }, true);
+      manualVideo.play().catch(() => {});
+    };
+
+    manualVideo.muted = true;
+    manualVideo.loop = true;
+    manualVideo.playsInline = true;
+    manualVideo.setAttribute('playsinline', 'true');
+    manualVideo.preload = 'auto';
+
+    const nativeHlsSupported = Boolean(
+      manualVideo.canPlayType('application/vnd.apple.mpegurl') ||
+        manualVideo.canPlayType('application/x-mpegURL')
     );
-  }, [clearOverlay, loading, scannerStarted, setStatus, stopLoop, updateDebug]);
+
+    const manualSource =
+      PROTOTYPE_PUZZLE.hlsUrl && nativeHlsSupported
+        ? PROTOTYPE_PUZZLE.hlsUrl
+        : PROTOTYPE_PUZZLE.videoUrl;
+
+    manualVideo.src = manualSource;
+    manualVideo.load();
+    manualVideo.addEventListener('canplay', markManualVideoReady);
+    manualVideo.addEventListener('canplaythrough', markManualVideoReady);
+    manualVideo.play().catch(() => {});
+
+    if (manualVideo.readyState >= 2) {
+      markManualVideoReady();
+    }
+
+    return () => {
+      manualVideo.removeEventListener('canplay', markManualVideoReady);
+      manualVideo.removeEventListener('canplaythrough', markManualVideoReady);
+    };
+  }, [manualDemoMode, setStatus, updateDebug]);
+
+  const onStartScanner = useCallback(() => {
+    setCameraError('');
+    setManualVideoReady(false);
+    setManualDemoMode(false);
+    setScannerStarted(true);
+    setInitNonce((value) => value + 1);
+    setStatus('Loading scanner engine...');
+    updateDebug({ engine: 'loading', note: 'Starting scanner...' }, true);
+  }, [setStatus, updateDebug]);
 
   const onRescan = useCallback(() => {
     if (!scannerStarted) {
@@ -997,28 +748,20 @@ function ARScanner() {
     }
 
     setManualDemoMode(false);
+    setManualVideoReady(false);
     setPuzzleDetected(false);
-    clearOverlay();
     setStatus('Point camera at the puzzle image.');
-    startLoop();
-    updateDebug({ detected: false, missStreak: 0, playbackMode: 'idle', note: 'Manual rescan triggered.' }, true);
-  }, [clearOverlay, scannerStarted, setStatus, startLoop, updateDebug]);
+    setMindarPlaneSource(sourceVideoReady ? 'video' : 'poster');
+    updateDebug({ detected: false, playbackMode: 'idle', note: 'Manual rescan triggered.' }, true);
+  }, [scannerStarted, setMindarPlaneSource, setStatus, sourceVideoReady, updateDebug]);
 
-  useEffect(() => {
-    if (!manualDemoMode) {
+  const onManualPlay = useCallback(() => {
+    if (!scannerStarted) {
       return;
     }
 
-    const manualVideo = manualVideoRef.current;
-    if (!manualVideo) {
-      return;
-    }
-
-    manualVideo.muted = true;
-    manualVideo.playsInline = true;
-    manualVideo.setAttribute('playsinline', 'true');
-    manualVideo.play().catch(() => {});
-  }, [manualDemoMode]);
+    activateManualFallback('Manual demo mode enabled. Tracking paused temporarily.');
+  }, [activateManualFallback, scannerStarted]);
 
   return (
     <section className="scanner-page">
@@ -1026,16 +769,12 @@ function ARScanner() {
         <header className="scanner-header">
           <div>
             <h1>Puzzle Scanner</h1>
-            <p>Point camera at the puzzle image and the video will play automatically.</p>
-            <p className="hint-text">Prototype mode active: one puzzle is live now, multi-puzzle system is ready for next phase.</p>
+            <p>MindAR prototype mode: one puzzle live now, scalable architecture ready next.</p>
+            <p className="hint-text">Poster appears instantly, then video swaps in when ready.</p>
           </div>
 
           <div className="scanner-toolbar">
-            <button
-              type="button"
-              className="btn btn-primary"
-              onClick={onStartScanner}
-            >
+            <button type="button" className="btn btn-primary" onClick={onStartScanner}>
               {scannerStarted ? 'Restart Scanner' : 'Start Scanner'}
             </button>
 
@@ -1045,7 +784,7 @@ function ARScanner() {
                   type="button"
                   className="btn btn-secondary"
                   onClick={() => {
-                    setDebugVisible((current) => !current);
+                    setDebugVisible((value) => !value);
                   }}
                 >
                   {debugVisible ? 'Hide Debug' : 'Show Debug'}
@@ -1065,67 +804,37 @@ function ARScanner() {
 
         {debugVisible && (
           <section className="debug-panel" aria-live="polite">
-            <h3>OpenCV Debug</h3>
+            <h3>Scanner Debug</h3>
             <p className="debug-note">{debugInfo.note}</p>
 
             <div className="debug-grid">
               <div>
+                <strong>Engine</strong>
+                <span>{debugInfo.engine}</span>
+              </div>
+              <div>
+                <strong>Target Source</strong>
+                <span>{targetSource}</span>
+              </div>
+              <div>
+                <strong>Scene Ready</strong>
+                <span>{sceneReady ? 'Yes' : 'No'}</span>
+              </div>
+              <div>
                 <strong>Detected</strong>
                 <span>{debugInfo.detected ? 'YES' : 'NO'}</span>
-              </div>
-              <div>
-                <strong>OpenCV</strong>
-                <span>{debugInfo.cvReady ? 'Ready' : 'Loading'}</span>
-              </div>
-              <div>
-                <strong>Playback Mode</strong>
-                <span>{debugInfo.playbackMode}</span>
               </div>
               <div>
                 <strong>Video Ready</strong>
                 <span>{debugInfo.videoReady ? 'Yes' : 'No'}</span>
               </div>
               <div>
-                <strong>Frame</strong>
-                <span>
-                  {debugInfo.frameWidth}x{debugInfo.frameHeight}
-                </span>
-              </div>
-              <div>
-                <strong>Reference Features</strong>
-                <span>{debugInfo.referenceFeatures}</span>
-              </div>
-              <div>
-                <strong>Frame Features</strong>
-                <span>{debugInfo.frameFeatures}</span>
-              </div>
-              <div>
-                <strong>Good Matches</strong>
-                <span>{debugInfo.goodMatches}</span>
-              </div>
-              <div>
-                <strong>Inliers</strong>
-                <span>{debugInfo.inliers}</span>
-              </div>
-              <div>
-                <strong>Homography</strong>
-                <span>{debugInfo.homographyReady ? 'Ready' : 'No'}</span>
-              </div>
-              <div>
-                <strong>Miss Streak</strong>
-                <span>{debugInfo.missStreak}</span>
-              </div>
-              <div>
-                <strong>Process</strong>
-                <span>{debugInfo.processMs} ms</span>
-              </div>
-              <div>
-                <strong>FPS Approx</strong>
-                <span>{debugInfo.fpsEstimate}</span>
+                <strong>Playback Mode</strong>
+                <span>{debugInfo.playbackMode}</span>
               </div>
               <div className="debug-wide">
                 <strong>Puzzle</strong>
-                <span>{debugInfo.puzzleName}</span>
+                <span>{PROTOTYPE_PUZZLE.name}</span>
               </div>
               <div className="debug-wide">
                 <strong>Source</strong>
@@ -1138,13 +847,34 @@ function ARScanner() {
         )}
 
         <div className="stage-wrap">
-          <video ref={cameraRef} className="camera-preview ready" playsInline muted autoPlay />
-          <canvas ref={overlayCanvasRef} className="opencv-overlay" />
+          {scannerStarted && targetSrc && (
+            <a-scene
+              ref={sceneRef}
+              className="mindar-scene"
+              mindar-image={`imageTargetSrc: ${targetSrc}; autoStart: true; uiScanning: no; uiLoading: no;`}
+              color-space="sRGB"
+              renderer="colorManagement: true, physicallyCorrectLights: false"
+              vr-mode-ui="enabled: false"
+              device-orientation-permission-ui="enabled: false"
+              embedded
+            >
+              <a-camera position="0 0 0" look-controls="enabled: false" />
+              <a-entity ref={targetEntityRef} mindar-image-target="targetIndex: 0">
+                <a-plane
+                  ref={targetPlaneRef}
+                  position="0 0 0"
+                  width="1"
+                  height="0.75"
+                  material="shader: flat; src: #mindar-poster-source; transparent: true; opacity: 1;"
+                />
+              </a-entity>
+            </a-scene>
+          )}
 
           {loading && (
             <div className="stage-loading">
               <h3>Preparing Scanner</h3>
-              <p>Getting camera and puzzle tracker ready...</p>
+              <p>Loading MindAR engine and camera...</p>
             </div>
           )}
 
@@ -1155,7 +885,7 @@ function ARScanner() {
             </div>
           )}
 
-          {scannerStarted && !loading && !cameraError && !puzzleDetected && (
+          {scannerStarted && !loading && !cameraError && !manualDemoMode && !puzzleDetected && (
             <div className="scan-overlay">
               <div className="scan-frame">
                 <p>Point camera at your puzzle</p>
@@ -1166,10 +896,14 @@ function ARScanner() {
 
           {scannerStarted && manualDemoMode && !cameraError && (
             <div className="ar-overlay">
+              <img
+                src={PROTOTYPE_PUZZLE.posterImageUrl || PROTOTYPE_PUZZLE.puzzleImageUrl}
+                alt="Poster frame"
+                className={`ar-poster ${manualVideoReady ? '' : 'visible'}`}
+              />
               <video
                 ref={manualVideoRef}
-                className="ar-video visible"
-                src={PROTOTYPE_PUZZLE.videoUrl}
+                className={`ar-video ${manualVideoReady ? 'visible' : ''}`}
                 autoPlay
                 muted
                 loop
@@ -1177,7 +911,7 @@ function ARScanner() {
               />
               <div className="overlay-badge">
                 <span>Demo Mode</span>
-                <small>Manual fallback active</small>
+                <small>Instant poster fallback active</small>
               </div>
             </div>
           )}
@@ -1186,23 +920,23 @@ function ARScanner() {
             <div className="stage-error">
               <h3>Scanner Error</h3>
               <p>{cameraError}</p>
-              <button
-                type="button"
-                className="btn btn-primary"
-                onClick={() => {
-                  setScannerStarted(true);
-                  setInitNonce((current) => current + 1);
-                }}
-              >
+              <button type="button" className="btn btn-primary" onClick={onStartScanner}>
                 Retry
               </button>
             </div>
           )}
         </div>
 
-        <canvas ref={processingCanvasRef} style={{ display: 'none' }} />
-        <canvas ref={sourceFrameCanvasRef} style={{ display: 'none' }} />
-        <video ref={sourceVideoRef} style={{ display: 'none' }} muted playsInline loop preload="auto" />
+        <img id="mindar-poster-source" src={PROTOTYPE_PUZZLE.posterImageUrl} alt="" style={{ display: 'none' }} />
+        <video
+          id="mindar-video-source"
+          ref={sourceVideoRef}
+          style={{ display: 'none' }}
+          muted
+          loop
+          playsInline
+          preload="auto"
+        />
       </div>
     </section>
   );
