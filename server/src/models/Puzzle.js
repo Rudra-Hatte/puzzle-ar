@@ -47,13 +47,6 @@ const puzzleSchema = new mongoose.Schema(
       type: String,
       trim: true,
     },
-    scanCode: {
-      type: String,
-      required: true,
-      unique: true,
-      index: true,
-      trim: true,
-    },
     isActive: {
       type: Boolean,
       default: true,
@@ -81,7 +74,6 @@ puzzleSchema.methods.toPublicJSON = function toPublicJSON() {
     markerId: this.markerId,
     markerAssetUrl: this.markerAssetUrl,
     puzzleImageUrl: this.puzzleImageUrl,
-    scanCode: this.scanCode,
     isActive: this.isActive,
     playbackSources: this.playbackSources,
     tags: this.tags,

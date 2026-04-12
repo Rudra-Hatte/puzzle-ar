@@ -1,9 +1,7 @@
 const express = require('express');
 const mongoose = require('mongoose');
-const QRCode = require('qrcode');
 
 const Puzzle = require('../models/Puzzle');
-const { normalizeScanPayload } = require('../utils/scanCode');
 
 const router = express.Router();
 
@@ -23,17 +21,22 @@ router.get('/puzzles/active', async (req, res) => {
 
 router.get('/puzzles/resolve', async (req, res) => {
   try {
-    const normalized = normalizeScanPayload(req.query.code);
+    const markerId = String(req.query.markerId || '').trim();
+    const puzzleId = String(req.query.puzzleId || '').trim();
 
-    if (!normalized) {
-      res.status(400).json({ message: 'Missing scan code' });
+    if (!markerId && !puzzleId) {
+      res.status(400).json({ message: 'Provide markerId or puzzleId' });
       return;
     }
 
-    const conditions = [{ scanCode: normalized }, { markerId: normalized }];
+    const conditions = [];
 
-    if (mongoose.Types.ObjectId.isValid(normalized)) {
-      conditions.push({ _id: normalized });
+    if (markerId) {
+      conditions.push({ markerId });
+    }
+
+    if (puzzleId && mongoose.Types.ObjectId.isValid(puzzleId)) {
+      conditions.push({ _id: puzzleId });
     }
 
     const puzzle = await Puzzle.findOne({
@@ -42,7 +45,7 @@ router.get('/puzzles/resolve', async (req, res) => {
     });
 
     if (!puzzle) {
-      res.status(404).json({ message: 'No active puzzle matched this code' });
+      res.status(404).json({ message: 'No active puzzle matched the request' });
       return;
     }
 
@@ -50,33 +53,6 @@ router.get('/puzzles/resolve', async (req, res) => {
   } catch (error) {
     console.error('Failed to resolve puzzle:', error);
     res.status(500).json({ message: 'Failed to resolve puzzle' });
-  }
-});
-
-router.get('/qr/:scanCode', async (req, res) => {
-  try {
-    const normalized = normalizeScanPayload(req.params.scanCode);
-
-    if (!normalized) {
-      res.status(400).json({ message: 'Invalid scan code' });
-      return;
-    }
-
-    const qrPayload = `puzzle:${normalized}`;
-    const qrDataUrl = await QRCode.toDataURL(qrPayload, {
-      width: 320,
-      margin: 1,
-      errorCorrectionLevel: 'M',
-    });
-
-    res.json({
-      scanCode: normalized,
-      qrPayload,
-      qrDataUrl,
-    });
-  } catch (error) {
-    console.error('Failed to generate QR:', error);
-    res.status(500).json({ message: 'Failed to generate QR' });
   }
 });
 

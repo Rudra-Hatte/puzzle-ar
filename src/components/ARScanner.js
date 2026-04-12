@@ -1,418 +1,407 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import jsQR from 'jsqr';
-import { resolvePuzzleByCode } from '../services/puzzleService';
-import {
-  extractYouTubeEmbedUrl,
-  normalizeScanPayload,
-  sortPlaybackSources,
-} from '../utils/arUtils';
+import { listActivePuzzles } from '../services/puzzleService';
+import { sortPlaybackSources } from '../utils/arUtils';
 
-const DETECTION_INTERVAL_MS = 280;
-const SCAN_COOLDOWN_MS = 1600;
+const VIDEO_ASSET_ID = 'mindar-overlay-video';
 const DIRECT_SOURCE_TIMEOUT_MS = 4500;
 
 function ARScanner() {
-  const cameraRef = useRef(null);
+  const sceneRef = useRef(null);
+  const targetRef = useRef(null);
   const overlayVideoRef = useRef(null);
-  const canvasRef = useRef(null);
-  const streamRef = useRef(null);
-  const detectionIntervalRef = useRef(null);
-  const startDetectionRef = useRef(() => {});
-  const lastScanRef = useRef({ code: '', at: 0 });
-  const markerInfoShownRef = useRef(false);
+  const compiledBlobUrlRef = useRef('');
+
+  const [runtimeReady, setRuntimeReady] = useState(false);
+  const [loadingPuzzles, setLoadingPuzzles] = useState(true);
+  const [puzzles, setPuzzles] = useState([]);
+  const [selectedPuzzleId, setSelectedPuzzleId] = useState('');
+  const [rebuildNonce, setRebuildNonce] = useState(0);
+
+  const [compilingTarget, setCompilingTarget] = useState(false);
+  const [compileProgress, setCompileProgress] = useState(0);
+  const [compiledTargetUrl, setCompiledTargetUrl] = useState('');
 
   const [cameraReady, setCameraReady] = useState(false);
-  const [cameraError, setCameraError] = useState('');
   const [isScanning, setIsScanning] = useState(false);
-  const [isResolving, setIsResolving] = useState(false);
-  const [detectionMode, setDetectionMode] = useState('marker');
-  const [useFrontCamera, setUseFrontCamera] = useState(false);
-  const [confidence, setConfidence] = useState(0);
-  const [statusText, setStatusText] = useState('Waiting for camera permission');
-
   const [puzzleDetected, setPuzzleDetected] = useState(false);
+  const [statusText, setStatusText] = useState('Preparing AR runtime...');
+  const [cameraError, setCameraError] = useState('');
+
   const [activePuzzle, setActivePuzzle] = useState(null);
   const [activeSource, setActiveSource] = useState(null);
   const [videoState, setVideoState] = useState('idle');
+  const [youtubeFallbackUrl, setYoutubeFallbackUrl] = useState('');
 
-  const stopDetection = useCallback(() => {
-    if (detectionIntervalRef.current) {
-      window.clearInterval(detectionIntervalRef.current);
-      detectionIntervalRef.current = null;
-    }
-  }, []);
-
-  const stopCameraStream = useCallback(() => {
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((track) => track.stop());
-      streamRef.current = null;
-    }
-  }, []);
-
-  const cleanup = useCallback(() => {
-    stopDetection();
-    stopCameraStream();
-  }, [stopDetection, stopCameraStream]);
-
-  const detectQRCode = useCallback(() => {
-    const video = cameraRef.current;
-    const canvas = canvasRef.current;
-
-    if (!video || !canvas || video.readyState < 2) {
-      return null;
-    }
-
-    const width = video.videoWidth || 1280;
-    const height = video.videoHeight || 720;
-
-    const context = canvas.getContext('2d', { willReadFrequently: true });
-    canvas.width = width;
-    canvas.height = height;
-
-    context.drawImage(video, 0, 0, width, height);
-    const imageData = context.getImageData(0, 0, width, height);
-    const qrCode = jsQR(imageData.data, width, height, { inversionAttempts: 'dontInvert' });
-
-    if (!qrCode || !qrCode.data) {
-      return null;
-    }
-
-    return {
-      via: 'qr',
-      code: qrCode.data,
-      confidence: 96,
-    };
-  }, []);
-
-  const detectMarkerPlaceholder = useCallback(() => {
-    if (!markerInfoShownRef.current) {
-      markerInfoShownRef.current = true;
-      setStatusText('Marker mode active. QR fallback is currently handling detection until marker targets are wired.');
-    }
-
-    return null;
-  }, []);
-
-  const playFromSources = useCallback((sources, startIndex = 0) => {
-    if (!Array.isArray(sources) || startIndex >= sources.length) {
-      setVideoState('error');
-      setStatusText('No playable video source was found for this puzzle.');
-      return;
-    }
-
-    const source = sources[startIndex];
-    setActiveSource(source);
-
-    if (source.type === 'youtube') {
-      const embedUrl = extractYouTubeEmbedUrl(source.url);
-
-      if (!embedUrl) {
-        playFromSources(sources, startIndex + 1);
-        return;
-      }
-
-      setActiveSource({ ...source, embedUrl });
-      setVideoState('playing');
-      setStatusText('Playing YouTube fallback source.');
-      return;
-    }
-
-    const video = overlayVideoRef.current;
-
-    if (!video) {
-      setVideoState('error');
-      setStatusText('Video layer is unavailable.');
-      return;
-    }
-
-    setVideoState('loading');
-    setStatusText(`Loading ${source.type.toUpperCase()} source...`);
-
-    let timeoutId = null;
-    let resolved = false;
-
-    const clearHandlers = () => {
-      video.oncanplay = null;
-      video.onplaying = null;
-      video.onerror = null;
-      if (timeoutId) {
-        window.clearTimeout(timeoutId);
-      }
-    };
-
-    const onFailure = () => {
-      if (resolved) {
-        return;
-      }
-      resolved = true;
-      clearHandlers();
-      playFromSources(sources, startIndex + 1);
-    };
-
-    const onSuccess = () => {
-      if (resolved) {
-        return;
-      }
-      resolved = true;
-      clearHandlers();
-      setVideoState('playing');
-      setStatusText('AR playback is running on the puzzle.');
-    };
-
-    video.pause();
-    video.removeAttribute('src');
-    video.load();
-
-    video.muted = true;
-    video.loop = true;
-    video.playsInline = true;
-    video.preload = 'auto';
-    video.crossOrigin = 'anonymous';
-
-    video.oncanplay = () => {
-      video.play().then(onSuccess).catch(onFailure);
-    };
-    video.onplaying = onSuccess;
-    video.onerror = onFailure;
-
-    timeoutId = window.setTimeout(onFailure, DIRECT_SOURCE_TIMEOUT_MS);
-
-    video.src = source.url;
-    video.load();
-  }, []);
-
-  const resolveDetectedPuzzle = useCallback(
-    async (rawCode, via) => {
-      const normalizedCode = normalizeScanPayload(rawCode);
-
-      if (!normalizedCode || isResolving || puzzleDetected) {
-        return;
-      }
-
-      const now = Date.now();
-      if (
-        lastScanRef.current.code === normalizedCode &&
-        now - lastScanRef.current.at < SCAN_COOLDOWN_MS
-      ) {
-        return;
-      }
-
-      lastScanRef.current = { code: normalizedCode, at: now };
-
-      setIsResolving(true);
-      setStatusText(`Detected ${via.toUpperCase()} target. Resolving puzzle...`);
-
-      try {
-        const response = await resolvePuzzleByCode(normalizedCode);
-        const puzzle = response?.puzzle;
-
-        if (!puzzle) {
-          throw new Error('Puzzle not found');
-        }
-
-        const playableSources = sortPlaybackSources(puzzle.playbackSources || []);
-
-        if (playableSources.length === 0) {
-          throw new Error('Puzzle has no configured playback source');
-        }
-
-        stopDetection();
-        setPuzzleDetected(true);
-        setIsScanning(false);
-        setActivePuzzle(puzzle);
-        setConfidence(100);
-
-        playFromSources(playableSources, 0);
-      } catch (error) {
-        setPuzzleDetected(false);
-        setActivePuzzle(null);
-        setActiveSource(null);
-        setVideoState('idle');
-        setStatusText(error.message || 'Scan detected but puzzle resolution failed.');
-      } finally {
-        setIsResolving(false);
-      }
-    },
-    [isResolving, playFromSources, puzzleDetected, stopDetection]
+  const selectedPuzzle = useMemo(
+    () => puzzles.find((puzzle) => String(puzzle.id) === String(selectedPuzzleId)) || null,
+    [puzzles, selectedPuzzleId]
   );
-
-  const runDetectionTick = useCallback(() => {
-    if (!cameraReady || !isScanning || isResolving || puzzleDetected) {
-      return;
-    }
-
-    let detection = null;
-
-    if (detectionMode === 'marker') {
-      detection = detectMarkerPlaceholder();
-      setConfidence((current) => Math.max(current, 20));
-    }
-
-    if (!detection) {
-      detection = detectQRCode();
-    }
-
-    if (!detection) {
-      setConfidence((current) => Math.max(current - 5, detectionMode === 'marker' ? 18 : 6));
-      return;
-    }
-
-    setConfidence(detection.confidence || 90);
-    resolveDetectedPuzzle(detection.code, detection.via || 'scan');
-  }, [
-    cameraReady,
-    isScanning,
-    isResolving,
-    puzzleDetected,
-    detectionMode,
-    detectMarkerPlaceholder,
-    detectQRCode,
-    resolveDetectedPuzzle,
-  ]);
-
-  const startDetection = useCallback(() => {
-    stopDetection();
-    setIsScanning(true);
-    setStatusText(
-      detectionMode === 'marker'
-        ? 'Marker mode is enabled. QR fallback is live for immediate reliability.'
-        : 'QR mode is enabled. Point at the puzzle QR to start AR.'
-    );
-
-    detectionIntervalRef.current = window.setInterval(() => {
-      runDetectionTick();
-    }, DETECTION_INTERVAL_MS);
-  }, [detectionMode, runDetectionTick, stopDetection]);
-
-  useEffect(() => {
-    startDetectionRef.current = startDetection;
-  }, [startDetection]);
-
-  const startCamera = useCallback(async () => {
-    setCameraError('');
-    setCameraReady(false);
-    setStatusText('Requesting camera access...');
-
-    stopDetection();
-    stopCameraStream();
-
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          facingMode: useFrontCamera ? 'user' : 'environment',
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
-        },
-        audio: false,
-      });
-
-      streamRef.current = stream;
-
-      const camera = cameraRef.current;
-      if (!camera) {
-        throw new Error('Camera element is unavailable');
-      }
-
-      camera.srcObject = stream;
-      camera.onloadedmetadata = () => {
-        camera
-          .play()
-          .then(() => {
-            setCameraReady(true);
-            setStatusText('Camera ready. Scanning started.');
-            startDetectionRef.current();
-          })
-          .catch(() => {
-            setCameraError('Camera stream could not start playback.');
-          });
-      };
-    } catch (error) {
-      setCameraError(error.message || 'Unable to access camera.');
-      setStatusText('Camera access failed.');
-    }
-  }, [stopCameraStream, stopDetection, useFrontCamera]);
-
-  const resetScanner = useCallback(() => {
-    setPuzzleDetected(false);
-    setActivePuzzle(null);
-    setActiveSource(null);
-    setVideoState('idle');
-    setConfidence(0);
-    markerInfoShownRef.current = false;
-
-    if (overlayVideoRef.current) {
-      overlayVideoRef.current.pause();
-      overlayVideoRef.current.removeAttribute('src');
-      overlayVideoRef.current.load();
-    }
-
-    if (cameraReady) {
-      startDetection();
-      return;
-    }
-
-    startCamera();
-  }, [cameraReady, startCamera, startDetection]);
-
-  const toggleCameraFacing = useCallback(() => {
-    setUseFrontCamera((current) => !current);
-    setPuzzleDetected(false);
-    setActivePuzzle(null);
-    setActiveSource(null);
-    setVideoState('idle');
-  }, []);
-
-  useEffect(() => {
-    startCamera();
-
-    return () => {
-      cleanup();
-    };
-  }, [cleanup, startCamera]);
-
-  useEffect(() => {
-    if (!cameraReady || puzzleDetected) {
-      return;
-    }
-
-    startDetection();
-  }, [cameraReady, detectionMode, puzzleDetected, startDetection]);
 
   const sourceLabel = useMemo(() => {
     if (!activeSource) {
-      return 'idle';
+      return 'none';
     }
 
     return activeSource.type || 'source';
   }, [activeSource]);
+
+  const stopOverlayVideo = useCallback(() => {
+    const video = overlayVideoRef.current;
+    if (!video) {
+      return;
+    }
+
+    video.pause();
+    video.removeAttribute('src');
+    video.load();
+  }, []);
+
+  const revokeCompiledUrl = useCallback(() => {
+    if (compiledBlobUrlRef.current) {
+      URL.revokeObjectURL(compiledBlobUrlRef.current);
+      compiledBlobUrlRef.current = '';
+    }
+  }, []);
+
+  const loadImageElement = useCallback((url) => {
+    return new Promise((resolve, reject) => {
+      const image = new Image();
+      image.crossOrigin = 'anonymous';
+      image.onload = () => resolve(image);
+      image.onerror = () => reject(new Error('Unable to load puzzle image for AR target compilation'));
+
+      const cacheBust = `${url}${url.includes('?') ? '&' : '?'}mindar=${Date.now()}`;
+      image.src = cacheBust;
+    });
+  }, []);
+
+  const compileTargetFromImage = useCallback(
+    async (imageUrl) => {
+      if (!window.MINDAR?.IMAGE?.Compiler) {
+        throw new Error('MindAR compiler runtime not available.');
+      }
+
+      const imageElement = await loadImageElement(imageUrl);
+      const compiler = new window.MINDAR.IMAGE.Compiler();
+
+      await compiler.compileImageTargets([imageElement], (progress) => {
+        const normalizedProgress = Number(progress) <= 1 ? Number(progress) * 100 : Number(progress);
+        setCompileProgress(Math.max(0, Math.min(100, Math.round(normalizedProgress))));
+      });
+
+      const compiled = compiler.exportData();
+      const blob = new Blob([compiled], { type: 'application/octet-stream' });
+
+      return URL.createObjectURL(blob);
+    },
+    [loadImageElement]
+  );
+
+  const playFromSources = useCallback(
+    (sources, startIndex = 0) => {
+      if (!Array.isArray(sources) || startIndex >= sources.length) {
+        setVideoState('error');
+        setStatusText('No direct MP4/HLS source is available for this puzzle.');
+        return;
+      }
+
+      const source = sources[startIndex];
+
+      if (source.type === 'youtube') {
+        setYoutubeFallbackUrl(source.url);
+        playFromSources(sources, startIndex + 1);
+        return;
+      }
+
+      const video = overlayVideoRef.current;
+      if (!video) {
+        setVideoState('error');
+        setStatusText('AR video asset is unavailable.');
+        return;
+      }
+
+      setActiveSource(source);
+      setVideoState('loading');
+
+      let resolved = false;
+      let timeoutId = null;
+
+      const clearHandlers = () => {
+        video.oncanplay = null;
+        video.onplaying = null;
+        video.onerror = null;
+        if (timeoutId) {
+          window.clearTimeout(timeoutId);
+        }
+      };
+
+      const onFailure = () => {
+        if (resolved) {
+          return;
+        }
+
+        resolved = true;
+        clearHandlers();
+        playFromSources(sources, startIndex + 1);
+      };
+
+      const onSuccess = () => {
+        if (resolved) {
+          return;
+        }
+
+        resolved = true;
+        clearHandlers();
+        setVideoState('playing');
+        setStatusText('Puzzle tracked. AR video is anchored and playing.');
+      };
+
+      video.pause();
+      video.removeAttribute('src');
+      video.load();
+
+      video.crossOrigin = 'anonymous';
+      video.preload = 'auto';
+      video.loop = true;
+      video.muted = true;
+      video.playsInline = true;
+
+      video.oncanplay = () => {
+        video.play().then(onSuccess).catch(onFailure);
+      };
+      video.onplaying = onSuccess;
+      video.onerror = onFailure;
+
+      timeoutId = window.setTimeout(onFailure, DIRECT_SOURCE_TIMEOUT_MS);
+
+      video.src = source.url;
+      video.load();
+    },
+    []
+  );
+
+  const loadPuzzles = useCallback(async () => {
+    setLoadingPuzzles(true);
+    setCameraError('');
+
+    try {
+      const response = await listActivePuzzles();
+      const active = Array.isArray(response?.puzzles) ? response.puzzles : [];
+
+      if (active.length === 0) {
+        throw new Error('No active puzzle found. Add and activate one puzzle from admin.');
+      }
+
+      setPuzzles(active);
+      setSelectedPuzzleId(String(active[0].id));
+      setStatusText('Puzzle list loaded. Building marker target from puzzle image...');
+    } catch (error) {
+      setCameraError(error.message || 'Failed to load active puzzles.');
+    } finally {
+      setLoadingPuzzles(false);
+    }
+  }, []);
+
+  const resetScanner = useCallback(() => {
+    stopOverlayVideo();
+    setPuzzleDetected(false);
+    setActivePuzzle(null);
+    setActiveSource(null);
+    setVideoState('idle');
+
+    if (cameraReady) {
+      setStatusText('Point your camera at the puzzle image to lock tracking.');
+      setIsScanning(true);
+      return;
+    }
+
+    setStatusText('Preparing scanner...');
+  }, [cameraReady, stopOverlayVideo]);
+
+  useEffect(() => {
+    let retries = 0;
+    const timer = window.setInterval(() => {
+      if (window.AFRAME && window.MINDAR?.IMAGE?.Compiler) {
+        setRuntimeReady(true);
+        setStatusText('MindAR runtime is ready. Loading active puzzles...');
+        window.clearInterval(timer);
+        return;
+      }
+
+      retries += 1;
+      if (retries > 40) {
+        setCameraError('MindAR runtime failed to load. Check network and refresh.');
+        window.clearInterval(timer);
+      }
+    }, 200);
+
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!runtimeReady) {
+      return;
+    }
+
+    loadPuzzles();
+  }, [runtimeReady, loadPuzzles]);
+
+  useEffect(() => {
+    if (!runtimeReady || !selectedPuzzle?.puzzleImageUrl) {
+      return;
+    }
+
+    let canceled = false;
+
+    const buildTarget = async () => {
+      setCompilingTarget(true);
+      setCompileProgress(0);
+      setCameraReady(false);
+      setIsScanning(false);
+      setPuzzleDetected(false);
+      setActivePuzzle(null);
+      setActiveSource(null);
+      setVideoState('idle');
+      setYoutubeFallbackUrl('');
+      setCameraError('');
+      setStatusText('Compiling target from puzzle image. Hold on...');
+
+      try {
+        const nextUrl = await compileTargetFromImage(selectedPuzzle.puzzleImageUrl);
+
+        if (canceled) {
+          URL.revokeObjectURL(nextUrl);
+          return;
+        }
+
+        revokeCompiledUrl();
+        compiledBlobUrlRef.current = nextUrl;
+        setCompiledTargetUrl(nextUrl);
+        setStatusText('Target ready. Point camera at the puzzle to start AR.');
+      } catch (error) {
+        if (!canceled) {
+          setCameraError(error.message || 'Failed to compile puzzle image target.');
+        }
+      } finally {
+        if (!canceled) {
+          setCompilingTarget(false);
+        }
+      }
+    };
+
+    buildTarget();
+
+    return () => {
+      canceled = true;
+    };
+  }, [compileTargetFromImage, rebuildNonce, revokeCompiledUrl, runtimeReady, selectedPuzzle]);
+
+  useEffect(() => {
+    const scene = sceneRef.current;
+    const target = targetRef.current;
+
+    if (!scene || !target || !compiledTargetUrl || !selectedPuzzle) {
+      return;
+    }
+
+    const onReady = () => {
+      setCameraReady(true);
+      setIsScanning(true);
+      setStatusText('Scanner is live. Move closer until the puzzle locks.');
+    };
+
+    const onError = () => {
+      setCameraError('AR camera failed to initialize.');
+      setStatusText('Camera initialization failed.');
+    };
+
+    const onFound = () => {
+      const sortedSources = sortPlaybackSources(selectedPuzzle.playbackSources || []);
+
+      setPuzzleDetected(true);
+      setIsScanning(false);
+      setActivePuzzle(selectedPuzzle);
+      playFromSources(sortedSources, 0);
+    };
+
+    const onLost = () => {
+      setPuzzleDetected(false);
+      setIsScanning(true);
+      setStatusText('Target lost. Point back at the puzzle image.');
+      stopOverlayVideo();
+      setVideoState('idle');
+    };
+
+    scene.addEventListener('arReady', onReady);
+    scene.addEventListener('arError', onError);
+    target.addEventListener('targetFound', onFound);
+    target.addEventListener('targetLost', onLost);
+
+    return () => {
+      scene.removeEventListener('arReady', onReady);
+      scene.removeEventListener('arError', onError);
+      target.removeEventListener('targetFound', onFound);
+      target.removeEventListener('targetLost', onLost);
+    };
+  }, [compiledTargetUrl, playFromSources, selectedPuzzle, stopOverlayVideo]);
+
+  useEffect(() => {
+    const mountedScene = sceneRef.current;
+
+    return () => {
+      stopOverlayVideo();
+
+      const system = mountedScene?.systems?.['mindar-image-system'];
+      if (system) {
+        try {
+          system.stop();
+        } catch (error) {
+          // Ignore stop failures during teardown.
+        }
+      }
+
+      revokeCompiledUrl();
+    };
+  }, [revokeCompiledUrl, stopOverlayVideo]);
 
   return (
     <section className="scanner-page">
       <div className="scanner-panel card">
         <header className="scanner-header">
           <div>
-            <h1>Interactive Puzzle AR Scanner</h1>
+            <h1>Puzzle AR Scanner</h1>
             <p>
-              Scan puzzle targets and play mapped AR videos. Marker mode is prepared with QR fallback for
-              production reliability.
+              Professional puzzle-only AR. MindAR now tracks the puzzle image directly with no QR fallback.
             </p>
           </div>
 
           <div className="scanner-toolbar">
             <label>
-              Detection Mode
+              Puzzle Target
               <select
-                value={detectionMode}
-                onChange={(event) => setDetectionMode(event.target.value)}
-                disabled={isResolving}
+                value={selectedPuzzleId}
+                onChange={(event) => setSelectedPuzzleId(event.target.value)}
+                disabled={loadingPuzzles || compilingTarget || puzzles.length <= 1}
               >
-                <option value="marker">Marker + QR fallback</option>
-                <option value="qr">QR only</option>
+                {puzzles.map((puzzle) => (
+                  <option key={puzzle.id} value={puzzle.id}>
+                    {puzzle.name}
+                  </option>
+                ))}
               </select>
             </label>
 
-            <button type="button" className="btn" onClick={toggleCameraFacing} disabled={isResolving}>
-              {useFrontCamera ? 'Use Rear Camera' : 'Use Front Camera'}
+            <button
+              type="button"
+              className="btn"
+              disabled={compilingTarget || !selectedPuzzle}
+              onClick={() => {
+                setRebuildNonce((current) => current + 1);
+              }}
+            >
+              Rebuild Target
             </button>
 
             <button type="button" className="btn btn-primary" onClick={resetScanner}>
@@ -422,96 +411,136 @@ function ARScanner() {
         </header>
 
         <div className="status-row">
-          <span className={`status-pill ${cameraReady ? 'ok' : 'pending'}`}>
-            {cameraReady ? 'Camera Ready' : 'Camera Booting'}
+          <span className={`status-pill ${runtimeReady ? 'ok' : 'pending'}`}>
+            {runtimeReady ? 'MindAR Ready' : 'Loading Runtime'}
           </span>
-          <span className={`status-pill ${puzzleDetected ? 'ok' : isResolving ? 'pending' : ''}`}>
-            {puzzleDetected ? 'Puzzle Locked' : isResolving ? 'Resolving Puzzle' : 'Scanning'}
+          <span className={`status-pill ${cameraReady ? 'ok' : 'pending'}`}>
+            {cameraReady ? 'Camera Ready' : 'Camera Starting'}
+          </span>
+          <span className={`status-pill ${puzzleDetected ? 'ok' : isScanning ? 'pending' : ''}`}>
+            {puzzleDetected ? 'Puzzle Locked' : isScanning ? 'Scanning' : 'Standby'}
           </span>
           <span className="status-detail">{statusText}</span>
         </div>
 
-        <div className="confidence-meter" aria-label="scan confidence">
-          <div className="confidence-fill" style={{ width: `${Math.min(confidence, 100)}%` }} />
-        </div>
+        {compilingTarget && (
+          <div className="compile-progress" aria-label="target compile progress">
+            <div className="compile-progress-fill" style={{ width: `${compileProgress}%` }} />
+          </div>
+        )}
 
         <div className="stage-wrap">
-          <video ref={cameraRef} className="camera-feed" muted autoPlay playsInline />
-          <canvas ref={canvasRef} style={{ display: 'none' }} />
-
-          {isScanning && !puzzleDetected && !cameraError && (
-            <div className="scan-overlay">
-              <div className="scan-frame">
-                <p>{detectionMode === 'marker' ? 'Marker scan active with QR fallback' : 'Point at puzzle QR'}</p>
-                <small>Confidence: {confidence}%</small>
-              </div>
+          {!runtimeReady || loadingPuzzles || compilingTarget || !compiledTargetUrl ? (
+            <div className="stage-loading">
+              <h3>Preparing Scanner</h3>
+              <p>
+                {compilingTarget
+                  ? `Compiling image target ${compileProgress}%`
+                  : 'Loading puzzle tracker and camera modules...'}
+              </p>
             </div>
-          )}
+          ) : (
+            <>
+              <a-scene
+                key={`${selectedPuzzleId}-${compiledTargetUrl}`}
+                ref={sceneRef}
+                class="mindar-scene"
+                mindar-image={`imageTargetSrc: ${compiledTargetUrl}; autoStart: true; uiLoading: no; uiScanning: no; uiError: no; maxTrack: 1; warmupTolerance: 5; missTolerance: 8;`}
+                color-space="sRGB"
+                renderer="precision: mediump; colorManagement: true; physicallyCorrectLights: true"
+                vr-mode-ui="enabled: false"
+                device-orientation-permission-ui="enabled: false"
+                embedded
+              >
+                <a-assets timeout="30000">
+                  <video
+                    id={VIDEO_ASSET_ID}
+                    ref={overlayVideoRef}
+                    muted
+                    playsInline
+                    webkit-playsinline="true"
+                    preload="auto"
+                    loop
+                    style={{ display: 'none' }}
+                  />
+                </a-assets>
+                <a-camera position="0 0 0" look-controls="enabled: false" />
+                <a-entity ref={targetRef} mindar-image-target="targetIndex: 0">
+                  <a-plane
+                    position="0 0 0"
+                    width="1"
+                    height="0.56"
+                    material={`shader: flat; src: #${VIDEO_ASSET_ID}; transparent: true; opacity: 1;`}
+                  />
+                </a-entity>
+              </a-scene>
 
-          {puzzleDetected && activePuzzle && (
-            <div className="ar-overlay">
-              {activeSource?.type === 'youtube' && activeSource.embedUrl ? (
-                <iframe
-                  className="ar-youtube"
-                  src={activeSource.embedUrl}
-                  title={`${activePuzzle.name} AR video`}
-                  allow="autoplay; encrypted-media; picture-in-picture"
-                  allowFullScreen
-                />
-              ) : (
-                <video
-                  ref={overlayVideoRef}
-                  className={`ar-video ${videoState === 'playing' ? 'visible' : ''}`}
-                  muted
-                  playsInline
-                  loop
-                />
-              )}
-
-              {videoState !== 'playing' && (
-                <div className="video-state">
-                  <p>{videoState === 'error' ? 'Unable to play source' : 'Preparing AR video...'}</p>
+              {isScanning && !puzzleDetected && !cameraError && (
+                <div className="scan-overlay">
+                  <div className="scan-frame">
+                    <p>Point camera to the selected puzzle image</p>
+                    <small>Keep the full puzzle in frame with good lighting</small>
+                  </div>
                 </div>
               )}
+            </>
+          )}
 
-              <div className="overlay-badge">
-                <span>{activePuzzle.name}</span>
-                <small>Source: {sourceLabel}</small>
-              </div>
+          {activePuzzle && (
+            <div className="overlay-badge">
+              <span>{activePuzzle.name}</span>
+              <small>Source: {sourceLabel}</small>
             </div>
           )}
 
           {cameraError && (
             <div className="stage-error">
-              <h3>Camera Error</h3>
+              <h3>Scanner Error</h3>
               <p>{cameraError}</p>
-              <button type="button" className="btn btn-primary" onClick={startCamera}>
-                Retry Camera
+              <button type="button" className="btn btn-primary" onClick={loadPuzzles}>
+                Retry Setup
               </button>
             </div>
           )}
         </div>
 
-        {activePuzzle && (
+        {videoState === 'error' && youtubeFallbackUrl && (
+          <div className="fallback-note card">
+            <p>
+              Direct AR video source failed. You can open the YouTube fallback, but it will not be texture-anchored on the puzzle.
+            </p>
+            <button
+              type="button"
+              className="btn"
+              onClick={() => {
+                window.open(youtubeFallbackUrl, '_blank', 'noopener,noreferrer');
+              }}
+            >
+              Open YouTube Fallback
+            </button>
+          </div>
+        )}
+
+        {selectedPuzzle && (
           <section className="puzzle-meta card">
-            <h3>Detected Puzzle</h3>
-            <p>{activePuzzle.description || 'No puzzle description provided yet.'}</p>
+            <h3>Selected Puzzle</h3>
+            <p>{selectedPuzzle.description || 'No puzzle description provided yet.'}</p>
             <div className="meta-grid">
               <div>
-                <strong>Scan Code</strong>
-                <span>{activePuzzle.scanCode}</span>
-              </div>
-              <div>
                 <strong>Marker ID</strong>
-                <span>{activePuzzle.markerId || 'not configured'}</span>
+                <span>{selectedPuzzle.markerId || 'auto-runtime target'}</span>
               </div>
               <div>
-                <strong>Sources</strong>
-                <span>{activePuzzle.playbackSources?.length || 0}</span>
+                <strong>Image Source</strong>
+                <span>{selectedPuzzle.puzzleImageUrl || 'missing'}</span>
+              </div>
+              <div>
+                <strong>Playback Sources</strong>
+                <span>{selectedPuzzle.playbackSources?.length || 0}</span>
               </div>
               <div>
                 <strong>Status</strong>
-                <span>{activePuzzle.isActive ? 'active' : 'inactive'}</span>
+                <span>{selectedPuzzle.isActive ? 'active' : 'inactive'}</span>
               </div>
             </div>
           </section>

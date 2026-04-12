@@ -1,15 +1,7 @@
 import { apiRequest } from './api';
 
-export async function resolvePuzzleByCode(code) {
-  return apiRequest(`/public/puzzles/resolve?code=${encodeURIComponent(code)}`);
-}
-
 export async function listActivePuzzles() {
   return apiRequest('/public/puzzles/active');
-}
-
-export async function getQrPreview(scanCode) {
-  return apiRequest(`/public/qr/${encodeURIComponent(scanCode)}`);
 }
 
 export async function listAdminPuzzles(token) {

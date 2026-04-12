@@ -155,6 +155,10 @@ a {
   line-height: 1.4;
 }
 
+.scanner-header h1 {
+  letter-spacing: 0.01em;
+}
+
 .scanner-toolbar {
   display: grid;
   gap: 0.65rem;
@@ -212,6 +216,21 @@ textarea {
   font-size: 0.9rem;
 }
 
+.compile-progress {
+  margin: 0.8rem 0 0.9rem;
+  width: 100%;
+  height: 9px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.14);
+  overflow: hidden;
+}
+
+.compile-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #ffb56a, #4ceec0);
+  transition: width 0.25s ease;
+}
+
 .confidence-meter {
   margin: 0.8rem 0 0.9rem;
   width: 100%;
@@ -231,26 +250,42 @@ textarea {
   position: relative;
   border-radius: 20px;
   overflow: hidden;
-  min-height: 420px;
+  min-height: min(72vh, 560px);
   border: 1px solid rgba(255, 255, 255, 0.18);
   background: #03070f;
 }
 
-.camera-feed {
+.mindar-scene {
   width: 100%;
   height: 100%;
-  min-height: 420px;
-  object-fit: cover;
+  min-height: min(72vh, 560px);
+  display: block;
 }
 
 .scan-overlay,
 .stage-error,
-.video-state {
+.video-state,
+.stage-loading {
   position: absolute;
   inset: 0;
   display: grid;
   place-items: center;
   text-align: center;
+}
+
+.stage-loading {
+  background: linear-gradient(140deg, rgba(7, 17, 31, 0.88), rgba(6, 28, 40, 0.75));
+  color: #e8f4ff;
+}
+
+.stage-loading h3,
+.stage-loading p {
+  margin: 0;
+}
+
+.stage-loading p {
+  margin-top: 0.45rem;
+  opacity: 0.86;
 }
 
 .scan-frame {
@@ -314,13 +349,14 @@ textarea {
 
 .overlay-badge {
   position: absolute;
-  left: 10px;
-  bottom: 10px;
+  left: 12px;
+  bottom: 12px;
   border-radius: 12px;
   background: rgba(8, 15, 27, 0.78);
   padding: 0.45rem 0.7rem;
   border: 1px solid rgba(255, 255, 255, 0.24);
   display: grid;
+  z-index: 12;
 }
 
 .overlay-badge span {
@@ -334,6 +370,21 @@ textarea {
 .stage-error {
   background: rgba(7, 16, 30, 0.8);
   padding: 1rem;
+  z-index: 15;
+}
+
+.fallback-note {
+  margin-top: 0.85rem;
+  padding: 0.8rem;
+  display: flex;
+  gap: 0.8rem;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.fallback-note p {
+  margin: 0;
+  opacity: 0.86;
 }
 
 .puzzle-meta {
@@ -542,31 +593,6 @@ textarea {
   gap: 0.4rem;
 }
 
-.qr-preview {
-  margin-top: 0.8rem;
-  border-top: 1px solid rgba(255, 255, 255, 0.18);
-  padding-top: 0.8rem;
-}
-
-.qr-preview h3,
-.qr-preview p {
-  margin: 0;
-}
-
-.qr-preview p {
-  margin-top: 0.3rem;
-  opacity: 0.85;
-}
-
-.qr-preview img {
-  margin-top: 0.55rem;
-  width: 190px;
-  border-radius: 12px;
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  background: #fff;
-  padding: 0.35rem;
-}
-
 @media (max-width: 980px) {
   .scanner-header,
   .admin-layout {
@@ -597,8 +623,13 @@ textarea {
   }
 
   .stage-wrap,
-  .camera-feed {
-    min-height: 330px;
+  .mindar-scene {
+    min-height: 64vh;
+  }
+
+  .fallback-note {
+    flex-direction: column;
+    align-items: flex-start;
   }
 
   .meta-grid {

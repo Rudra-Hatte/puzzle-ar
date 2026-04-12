@@ -1,35 +1,3 @@
-export function normalizeScanPayload(input) {
-  if (!input) {
-    return '';
-  }
-
-  let candidate = String(input).trim();
-
-  if (!candidate) {
-    return '';
-  }
-
-  if (candidate.startsWith('puzzle:')) {
-    candidate = candidate.slice('puzzle:'.length);
-  }
-
-  try {
-    const parsedUrl = new URL(candidate);
-    const queryCode =
-      parsedUrl.searchParams.get('code') ||
-      parsedUrl.searchParams.get('puzzle') ||
-      parsedUrl.searchParams.get('id');
-
-    if (queryCode) {
-      candidate = queryCode;
-    }
-  } catch (error) {
-    // Not a URL payload. Keep raw scan text.
-  }
-
-  return candidate.trim();
-}
-
 export function inferSourceType(url) {
   const value = String(url || '').toLowerCase();
 

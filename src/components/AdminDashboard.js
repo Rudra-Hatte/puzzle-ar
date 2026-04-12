@@ -4,7 +4,6 @@ import { logout, getAuthToken } from '../services/authService';
 import {
   createPuzzle,
   deletePuzzle,
-  getQrPreview,
   listAdminPuzzles,
   updatePuzzle,
   uploadPuzzleAsset,
@@ -19,7 +18,6 @@ const initialFormState = {
   videoUrl: '',
   youtubeUrl: '',
   tags: '',
-  scanCode: '',
   isActive: true,
 };
 
@@ -32,7 +30,6 @@ function AdminDashboard() {
   const [editingPuzzleId, setEditingPuzzleId] = useState('');
   const [feedback, setFeedback] = useState('');
   const [error, setError] = useState('');
-  const [qrPreview, setQrPreview] = useState(null);
 
   const token = getAuthToken();
 
@@ -76,7 +73,6 @@ function AdminDashboard() {
       videoUrl: directVideo?.url || '',
       youtubeUrl: youtubeSource?.url || '',
       tags: Array.isArray(puzzle.tags) ? puzzle.tags.join(', ') : '',
-      scanCode: puzzle.scanCode || '',
       isActive: Boolean(puzzle.isActive),
     });
   };
@@ -135,7 +131,6 @@ function AdminDashboard() {
 
       setForm(initialFormState);
       setEditingPuzzleId('');
-      setQrPreview(null);
       await loadPuzzles();
     } catch (err) {
       setError(err.message || 'Failed to save puzzle');
@@ -147,7 +142,6 @@ function AdminDashboard() {
   const handleEdit = (puzzle) => {
     setEditingPuzzleId(puzzle.id);
     applyPuzzleToForm(puzzle);
-    setQrPreview(null);
     setFeedback(`Editing ${puzzle.name}`);
   };
 
@@ -174,18 +168,6 @@ function AdminDashboard() {
     }
   };
 
-  const handleViewQr = async (scanCode) => {
-    setError('');
-    setFeedback('');
-
-    try {
-      const response = await getQrPreview(scanCode);
-      setQrPreview(response);
-    } catch (err) {
-      setError(err.message || 'Failed to generate QR preview');
-    }
-  };
-
   const handleCancelEdit = () => {
     setEditingPuzzleId('');
     setForm(initialFormState);
@@ -202,7 +184,7 @@ function AdminDashboard() {
       <div className="admin-topbar">
         <div>
           <h1>Puzzle Admin</h1>
-          <p>Create puzzles, assign video sources, and generate scan payloads.</p>
+          <p>Create puzzles, assign direct video sources, and manage puzzle-image AR tracking.</p>
         </div>
         <button type="button" className="btn" onClick={handleLogout}>
           Logout
@@ -266,6 +248,7 @@ function AdminDashboard() {
                   setForm((current) => ({ ...current, puzzleImageUrl: event.target.value }))
                 }
                 placeholder="https://cdn.example.com/images/puzzle.jpg"
+                required
               />
             </label>
 
@@ -291,24 +274,13 @@ function AdminDashboard() {
             </label>
 
             <label className="full-width">
-              YouTube URL (fallback)
+              YouTube URL (optional fallback)
               <input
                 value={form.youtubeUrl}
                 onChange={(event) =>
                   setForm((current) => ({ ...current, youtubeUrl: event.target.value }))
                 }
                 placeholder="https://www.youtube.com/watch?v=..."
-              />
-            </label>
-
-            <label>
-              Scan Code (optional)
-              <input
-                value={form.scanCode}
-                onChange={(event) =>
-                  setForm((current) => ({ ...current, scanCode: event.target.value }))
-                }
-                placeholder="Auto-generated if empty"
               />
             </label>
 
@@ -364,7 +336,7 @@ function AdminDashboard() {
                     <h3>{puzzle.name}</h3>
                     <p>{puzzle.description || 'No description yet'}</p>
                     <small>
-                      Scan Code: <strong>{puzzle.scanCode}</strong> | Marker: {puzzle.markerId || 'not set'}
+                      Marker: {puzzle.markerId || 'not set'} | Image: {puzzle.puzzleImageUrl || 'missing'}
                     </small>
                     <div className="chips">
                       <span className={`chip ${puzzle.isActive ? 'chip-active' : 'chip-inactive'}`}>
@@ -377,9 +349,6 @@ function AdminDashboard() {
                     <button type="button" className="btn" onClick={() => handleEdit(puzzle)}>
                       Edit
                     </button>
-                    <button type="button" className="btn" onClick={() => handleViewQr(puzzle.scanCode)}>
-                      QR
-                    </button>
                     <button type="button" className="btn btn-danger" onClick={() => handleDelete(puzzle.id)}>
                       Delete
                     </button>
@@ -387,14 +356,6 @@ function AdminDashboard() {
                 </li>
               ))}
             </ul>
-          )}
-
-          {qrPreview && (
-            <div className="qr-preview">
-              <h3>QR Preview</h3>
-              <p>{qrPreview.qrPayload}</p>
-              <img src={qrPreview.qrDataUrl} alt={`QR for ${qrPreview.scanCode}`} />
-            </div>
           )}
         </div>
       </div>

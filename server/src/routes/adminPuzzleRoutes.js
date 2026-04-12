@@ -5,7 +5,6 @@ const multer = require('multer');
 
 const Puzzle = require('../models/Puzzle');
 const requireAdmin = require('../middleware/requireAdmin');
-const { generateScanCode, normalizeScanPayload } = require('../utils/scanCode');
 
 const router = express.Router();
 
@@ -94,16 +93,6 @@ function normalizePlaybackSources(payload) {
   return Array.from(deduped.values()).sort((left, right) => left.priority - right.priority);
 }
 
-async function getUniqueScanCode(preferredCode) {
-  let candidate = normalizeScanPayload(preferredCode) || generateScanCode();
-
-  while (await Puzzle.exists({ scanCode: candidate })) {
-    candidate = generateScanCode();
-  }
-
-  return candidate;
-}
-
 function mapPuzzle(puzzle) {
   return typeof puzzle.toPublicJSON === 'function' ? puzzle.toPublicJSON() : puzzle;
 }
@@ -145,7 +134,10 @@ router.post('/', async (req, res) => {
       return;
     }
 
-    const scanCode = await getUniqueScanCode(req.body.scanCode);
+    if (!puzzleImageUrl || !String(puzzleImageUrl).trim()) {
+      res.status(400).json({ message: 'Puzzle image URL is required for AR tracking' });
+      return;
+    }
 
     const puzzle = await Puzzle.create({
       name: String(name).trim(),
@@ -153,7 +145,6 @@ router.post('/', async (req, res) => {
       markerId: markerId || '',
       markerAssetUrl: markerAssetUrl || '',
       puzzleImageUrl: puzzleImageUrl || '',
-      scanCode,
       isActive: isActive !== false && isActive !== 'false',
       playbackSources: normalizePlaybackSources(req.body),
       tags: Array.isArray(tags)
@@ -202,16 +193,9 @@ router.put('/:id', async (req, res) => {
       puzzle.puzzleImageUrl = req.body.puzzleImageUrl || '';
     }
 
-    if (req.body.scanCode !== undefined) {
-      const normalizedCode = normalizeScanPayload(req.body.scanCode);
-      if (normalizedCode && normalizedCode !== puzzle.scanCode) {
-        const existing = await Puzzle.findOne({ scanCode: normalizedCode, _id: { $ne: puzzle._id } });
-        if (existing) {
-          res.status(400).json({ message: 'Scan code already exists' });
-          return;
-        }
-        puzzle.scanCode = normalizedCode;
-      }
+    if (!String(puzzle.puzzleImageUrl || '').trim()) {
+      res.status(400).json({ message: 'Puzzle image URL is required for AR tracking' });
+      return;
     }
 
     if (req.body.isActive !== undefined) {
