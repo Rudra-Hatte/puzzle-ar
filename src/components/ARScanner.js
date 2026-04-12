@@ -2,7 +2,6 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 
 const SCRIPT_TIMEOUT_MS = 12000;
 const HLS_WAIT_TIMEOUT_MS = 5000;
-const ENGINE_SLOW_FALLBACK_MS = 2200;
 const TARGET_CACHE_KEY = 'prototype-mindar-target-v1';
 
 const AFRAME_SCRIPT_URLS = [
@@ -203,7 +202,6 @@ function ARScanner() {
   const sourceVideoRef = useRef(null);
   const manualVideoRef = useRef(null);
   const hlsControllerRef = useRef(null);
-  const fallbackTimerRef = useRef(0);
   const dynamicTargetUrlRef = useRef('');
   const manualDemoModeRef = useRef(false);
   const statusRef = useRef('Tap Start Scanner to begin.');
@@ -244,13 +242,6 @@ function ARScanner() {
     setDebugInfo(next);
   }, []);
 
-  const clearFallbackTimer = useCallback(() => {
-    if (fallbackTimerRef.current) {
-      window.clearTimeout(fallbackTimerRef.current);
-      fallbackTimerRef.current = 0;
-    }
-  }, []);
-
   const clearHlsController = useCallback(() => {
     if (hlsControllerRef.current) {
       hlsControllerRef.current.destroy();
@@ -287,7 +278,6 @@ function ARScanner() {
 
   const activateManualFallback = useCallback(
     (noteText) => {
-      clearFallbackTimer();
       setLoading(false);
       setManualVideoReady(false);
       setManualDemoMode(true);
@@ -306,7 +296,7 @@ function ARScanner() {
         true
       );
     },
-    [clearFallbackTimer, setStatus, updateDebug]
+    [setStatus, updateDebug]
   );
 
   const configureSourceVideo = useCallback(async () => {
@@ -497,15 +487,6 @@ function ARScanner() {
         );
         setStatus('Loading scanner engine...');
 
-        clearFallbackTimer();
-        fallbackTimerRef.current = window.setTimeout(() => {
-          if (canceled || manualDemoModeRef.current) {
-            return;
-          }
-
-          activateManualFallback('MindAR engine is still loading. Showing instant poster fallback.');
-        }, ENGINE_SLOW_FALLBACK_MS);
-
         await configureSourceVideo();
         if (canceled) return;
 
@@ -545,9 +526,16 @@ function ARScanner() {
           return;
         }
 
-        activateManualFallback('MindAR initialization failed. Demo fallback activated.');
-      } finally {
-        clearFallbackTimer();
+        setLoading(false);
+        setCameraError(error.message || 'MindAR initialization failed.');
+        setStatus('Scanner initialization failed.');
+        updateDebug(
+          {
+            engine: 'error',
+            note: error.message || 'MindAR initialization failed.',
+          },
+          true
+        );
       }
     };
 
@@ -555,7 +543,6 @@ function ARScanner() {
 
     return () => {
       canceled = true;
-      clearFallbackTimer();
       clearHlsController();
 
       const sourceVideo = sourceVideoAtMount;
@@ -573,7 +560,6 @@ function ARScanner() {
     scannerStarted,
     initNonce,
     activateManualFallback,
-    clearFallbackTimer,
     clearHlsController,
     configureSourceVideo,
     resolveTargetSource,
@@ -756,12 +742,12 @@ function ARScanner() {
   }, [scannerStarted, setMindarPlaneSource, setStatus, sourceVideoReady, updateDebug]);
 
   const onManualPlay = useCallback(() => {
-    if (!scannerStarted) {
+    if (!scannerStarted || loading) {
       return;
     }
 
     activateManualFallback('Manual demo mode enabled. Tracking paused temporarily.');
-  }, [activateManualFallback, scannerStarted]);
+  }, [activateManualFallback, loading, scannerStarted]);
 
   return (
     <section className="scanner-page">
@@ -778,7 +764,7 @@ function ARScanner() {
               {scannerStarted ? 'Restart Scanner' : 'Start Scanner'}
             </button>
 
-            {scannerStarted && (
+            {scannerStarted && !loading && (
               <>
                 <button
                   type="button"
