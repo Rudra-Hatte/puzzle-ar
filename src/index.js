@@ -1,11 +1,3 @@
-import React from 'react';
-import ReactDOM from 'react-dom/client';
-import App from './App';
-import './styles/App.css';
-
-const root = ReactDOM.createRoot(document.getElementById('root'));
-root.render(
-  <React.StrictMode>
-    <App />
-  </React.StrictMode>
-);
+// Immediately redirect to the pure HTML AR scanner page
+// This skips the entire React UI and loads the simple fullscreen AR camera.
+window.location.replace('/scanner.html');
