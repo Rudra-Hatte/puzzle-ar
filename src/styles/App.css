@@ -281,6 +281,8 @@ textarea {
   opacity: 1;
 }
 
+/* MindAR injects its own scene — keep pointer-events ON so tracking works on mobile */
+#ar-scene,
 .mindar-scene {
   position: absolute;
   inset: 0;
@@ -290,9 +292,10 @@ textarea {
   min-height: 0;
   display: block;
   background: transparent !important;
-  pointer-events: none;
+  /* pointer-events must NOT be none — MindAR needs touch/mouse events for camera */
 }
 
+#ar-scene video,
 .mindar-scene video,
 .mindar-scene .mindar-video {
   position: absolute !important;
@@ -304,6 +307,7 @@ textarea {
   z-index: 1 !important;
 }
 
+#ar-scene canvas,
 .mindar-scene canvas,
 .mindar-scene .a-canvas {
   position: absolute !important;
@@ -432,6 +436,137 @@ textarea {
     transform: scale(1.02);
     box-shadow: 0 0 28px rgba(86, 242, 195, 0.35);
   }
+}
+
+/* ── Loader spinner ── */
+.loader-spinner {
+  width: 48px;
+  height: 48px;
+  border: 4px solid rgba(255, 255, 255, 0.15);
+  border-top-color: #3ddca0;
+  border-radius: 50%;
+  animation: spin 0.85s linear infinite;
+  margin-bottom: 1rem;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.idle-icon {
+  font-size: 3rem;
+  margin-bottom: 0.75rem;
+}
+
+.error-icon {
+  font-size: 2.5rem;
+  margin-bottom: 0.5rem;
+}
+
+/* ── Scan frame corners + line ── */
+.scan-frame {
+  position: relative;
+  width: min(82%, 520px);
+  aspect-ratio: 4 / 3;
+  border-radius: 18px;
+  background: linear-gradient(140deg, rgba(7, 19, 35, 0.25), rgba(8, 25, 45, 0.45));
+  display: grid;
+  place-items: center;
+  gap: 0.25rem;
+  text-align: center;
+}
+
+.scan-frame p,
+.scan-frame small {
+  margin: 0;
+  position: relative;
+  z-index: 2;
+}
+
+.scan-corner {
+  position: absolute;
+  width: 28px;
+  height: 28px;
+  border-color: rgba(86, 242, 195, 0.9);
+  border-style: solid;
+}
+
+.scan-corner.tl { top: 0; left: 0; border-width: 3px 0 0 3px; border-radius: 8px 0 0 0; }
+.scan-corner.tr { top: 0; right: 0; border-width: 3px 3px 0 0; border-radius: 0 8px 0 0; }
+.scan-corner.bl { bottom: 0; left: 0; border-width: 0 0 3px 3px; border-radius: 0 0 0 8px; }
+.scan-corner.br { bottom: 0; right: 0; border-width: 0 3px 3px 0; border-radius: 0 0 8px 0; }
+
+.scan-line {
+  position: absolute;
+  left: 6%;
+  right: 6%;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, #3ddca0, transparent);
+  animation: scanLine 2s ease-in-out infinite;
+  z-index: 1;
+}
+
+@keyframes scanLine {
+  0%   { top: 10%; opacity: 0; }
+  10%  { opacity: 1; }
+  90%  { opacity: 1; }
+  100% { top: 90%; opacity: 0; }
+}
+
+/* ── Detected badge ── */
+.detected-badge {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  background: rgba(8, 20, 35, 0.82);
+  border: 1px solid rgba(61, 220, 160, 0.75);
+  border-radius: 999px;
+  padding: 0.38rem 0.8rem;
+  font-weight: 700;
+  font-size: 0.88rem;
+  color: #6fffc8;
+  backdrop-filter: blur(8px);
+  box-shadow: 0 0 16px rgba(61, 220, 160, 0.35);
+  animation: badgePop 0.3s ease;
+}
+
+.detected-dot {
+  width: 9px;
+  height: 9px;
+  background: #3ddca0;
+  border-radius: 50%;
+  animation: dotPulse 1.2s ease-in-out infinite;
+}
+
+@keyframes dotPulse {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.4); opacity: 0.7; }
+}
+
+@keyframes badgePop {
+  from { transform: scale(0.7); opacity: 0; }
+  to   { transform: scale(1);   opacity: 1; }
+}
+
+/* ── Demo overlay ── */
+.demo-overlay {
+  position: absolute;
+  inset: 0;
+  background: #000;
+  z-index: 12;
+}
+
+.demo-video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: opacity 0.4s ease;
 }
 
 .ar-overlay {
